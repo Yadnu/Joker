@@ -1,0 +1,267 @@
+"""Pydantic response models for the Box API.
+
+Every endpoint in box/router.py declares one of these as its response_model.
+This causes FastAPI to:
+  1. Generate typed response schemas in /openapi.json.
+  2. Validate and serialize the returned dict against the declared shape.
+  3. Strip undeclared fields before sending.
+
+Nested shapes reuse the canonical types from records.py so the response
+schema matches the write schema exactly.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from pydantic import BaseModel
+
+from box.schema.records import Attribution, JokeMetadata, PromptTurn, Provenance, SetId
+
+
+# ---------------------------------------------------------------------------
+# Shared leaf types
+# ---------------------------------------------------------------------------
+
+class NodeOut(BaseModel):
+    """Minimal id + label reference used inside nested trees."""
+    id: str
+    label: str
+
+
+# ---------------------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------------------
+
+class HealthOut(BaseModel):
+    status: str
+
+
+# ---------------------------------------------------------------------------
+# Accounts
+# ---------------------------------------------------------------------------
+
+class AccountOut(BaseModel):
+    id: str
+    name: str
+    created_at: datetime
+
+
+class AccountListOut(BaseModel):
+    accounts: list[AccountOut]
+
+
+# ---------------------------------------------------------------------------
+# Upsert
+# ---------------------------------------------------------------------------
+
+class UpsertOut(BaseModel):
+    joke_id: str
+    cabinet_id: str
+    drawer_id: str
+    file_id: str
+
+
+# ---------------------------------------------------------------------------
+# Jokes
+# ---------------------------------------------------------------------------
+
+class JokeOut(BaseModel):
+    id: str
+    file_id: str
+    account_id: str | None = None
+    prompt_responses: list[PromptTurn]
+    joke_text: str
+    user_reaction: str
+    score: int
+    category: str
+    metadata: JokeMetadata
+    user_context: str
+    attribution: Attribution
+    provenance: Provenance
+    set_id: SetId
+
+
+class JokeSummaryOut(BaseModel):
+    """Minimal joke reference used inside file-detail responses."""
+    id: str
+    score: int
+
+
+# ---------------------------------------------------------------------------
+# Trace
+# ---------------------------------------------------------------------------
+
+class TraceStepOut(BaseModel):
+    id: str
+    kind: str
+    actor: str
+    rationale: str
+    latency_ms: int
+
+
+class TraceOut(BaseModel):
+    joke_id: str
+    steps: list[TraceStepOut]
+
+
+# ---------------------------------------------------------------------------
+# Hierarchy reads
+# ---------------------------------------------------------------------------
+
+class DrawerSummaryOut(BaseModel):
+    """Used in flat drawer lists and cabinet-detail drawer arrays."""
+    id: str
+    label: str
+    cabinet_id: str | None = None  # present in flat list; omitted in nested tree
+
+
+class FileSummaryOut(BaseModel):
+    id: str
+    label: str
+    joke_count: int
+
+
+class CabinetDetailOut(BaseModel):
+    id: str
+    label: str
+    drawers: list[NodeOut]
+
+
+class CabinetListOut(BaseModel):
+    cabinets: list[NodeOut]
+
+
+class DrawerListOut(BaseModel):
+    drawers: list[DrawerSummaryOut]
+
+
+class DrawerDetailOut(BaseModel):
+    id: str
+    label: str
+    cabinet_id: str
+    files: list[NodeOut]
+
+
+class FileDetailOut(BaseModel):
+    id: str
+    label: str
+    drawer_id: str
+    jokes: list[JokeSummaryOut]
+
+
+# ---------------------------------------------------------------------------
+# Tree (GET /box)
+# ---------------------------------------------------------------------------
+
+class TreeFileOut(BaseModel):
+    id: str
+    label: str
+    joke_count: int
+
+
+class TreeDrawerOut(BaseModel):
+    id: str
+    label: str
+    files: list[TreeFileOut]
+
+
+class TreeCabinetOut(BaseModel):
+    id: str
+    label: str
+    drawers: list[TreeDrawerOut]
+
+
+class TreeOut(BaseModel):
+    cabinets: list[TreeCabinetOut]
+
+
+# ---------------------------------------------------------------------------
+# Path read (GET /box/{cabinet}/{drawer}/{file})
+# ---------------------------------------------------------------------------
+
+class PathReadOut(BaseModel):
+    cabinet: NodeOut
+    drawer: NodeOut
+    file: NodeOut
+    jokes: list[JokeOut]
+
+
+# ---------------------------------------------------------------------------
+# Funniest in genre
+# ---------------------------------------------------------------------------
+
+class FunniestOut(BaseModel):
+    genre: str
+    jokes: list[JokeOut]
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+class ExportFileOut(BaseModel):
+    id: str
+    label: str
+    jokes: list[JokeOut]
+
+
+class ExportDrawerOut(BaseModel):
+    id: str
+    label: str
+    files: list[ExportFileOut]
+
+
+class ExportCabinetOut(BaseModel):
+    id: str
+    label: str
+    drawers: list[ExportDrawerOut]
+
+
+class ExportOut(BaseModel):
+    cabinets: list[ExportCabinetOut]
+
+
+# ---------------------------------------------------------------------------
+# Scoped counts
+# ---------------------------------------------------------------------------
+
+class CabinetCountsOut(BaseModel):
+    cabinet_id: str
+    drawers: int
+    files: int
+    jokes: int
+
+
+class DrawerCountsOut(BaseModel):
+    drawer_id: str
+    files: int
+    jokes: int
+
+
+class FileCountsOut(BaseModel):
+    file_id: str
+    jokes: int
+
+
+class GlobalCountsOut(BaseModel):
+    cabinets: int
+    drawers: int
+    files: int
+    jokes: int
+
+
+# ---------------------------------------------------------------------------
+# Compliance
+# ---------------------------------------------------------------------------
+
+class ViolationOut(BaseModel):
+    level: str
+    path: str
+    child_count: int
+    reason: str
+
+
+class ComplianceOut(BaseModel):
+    compliant: bool
+    violations: list[ViolationOut]

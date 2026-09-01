@@ -1,16 +1,27 @@
 """Box HTTP API — FastAPI router.
 
-Endpoints (per box-api skill):
+Endpoints:
   GET  /health
-  GET  /box
+  POST /accounts
+  GET  /accounts
+  GET  /accounts/{account_id}
   PUT  /box/upsert
+  GET  /box
+  GET  /box/{cabinet}/{drawer}/{file}
   GET  /cabinets
   GET  /cabinets/{cabinet_id}
+  GET  /cabinets/{cabinet_id}/counts
+  GET  /drawers
   GET  /drawers/{drawer_id}
+  GET  /drawers/{drawer_id}/counts
   GET  /files/{file_id}
+  GET  /files/{file_id}/counts
   GET  /jokes/{joke_id}
   GET  /jokes/{joke_id}/trace
+  GET  /genres/{genre}/funniest
+  GET  /export
   GET  /compliance
+  GET  /counts
 
 Classification intelligence lives in the Librarian, not here.
 The Box stores what it is handed; it does not infer, default, or repair paths.
@@ -29,6 +40,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from box.schema.models import Account, Cabinet, Drawer, File, Joke, Trace
 from box.schema.records import JokeRecord
+from box.schema.responses import (
+    AccountListOut,
+    AccountOut,
+    CabinetCountsOut,
+    CabinetDetailOut,
+    CabinetListOut,
+    ComplianceOut,
+    DrawerCountsOut,
+    DrawerDetailOut,
+    DrawerListOut,
+    ExportOut,
+    FileCountsOut,
+    FileDetailOut,
+    FunniestOut,
+    GlobalCountsOut,
+    HealthOut,
+    JokeOut,
+    PathReadOut,
+    TraceOut,
+    TreeOut,
+    UpsertOut,
+)
 from shared.db import get_session
 
 router = APIRouter()
@@ -46,9 +79,9 @@ def _level_error(level: str, reason: str, status: int = 404) -> HTTPException:
 # Health
 # ---------------------------------------------------------------------------
 
-@router.get("/health")
-async def health() -> dict:
-    return {"status": "ok"}
+@router.get("/health", response_model=HealthOut)
+async def health() -> HealthOut:
+    return HealthOut(status="ok")
 
 
 # ---------------------------------------------------------------------------
@@ -59,39 +92,47 @@ class AccountCreate(BaseModel):
     name: str
 
 
-@router.post("/accounts", status_code=201)
+@router.post("/accounts", status_code=201, response_model=AccountOut)
 async def create_account(
     body: AccountCreate,
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> AccountOut:
     """Register a new account.  Names must be unique."""
     existing = (
         await session.execute(select(Account).where(Account.name == body.name))
     ).scalar_one_or_none()
     if existing is not None:
-        raise HTTPException(status_code=409, detail={"reason": f"Account '{body.name}' already exists."})
+        raise HTTPException(
+            status_code=409,
+            detail={"reason": f"Account '{body.name}' already exists."},
+        )
     acct = Account(name=body.name)
     session.add(acct)
     await session.commit()
-    return {"id": acct.id, "name": acct.name, "created_at": acct.created_at.isoformat()}
+    return AccountOut(id=acct.id, name=acct.name, created_at=acct.created_at)
 
 
-@router.get("/accounts")
-async def list_accounts(session: AsyncSession = Depends(get_session)) -> dict:
+@router.get("/accounts", response_model=AccountListOut)
+async def list_accounts(session: AsyncSession = Depends(get_session)) -> AccountListOut:
     rows = (await session.execute(select(Account))).scalars().all()
-    return {"accounts": [{"id": r.id, "name": r.name} for r in rows]}
+    return AccountListOut(
+        accounts=[AccountOut(id=r.id, name=r.name, created_at=r.created_at) for r in rows]
+    )
 
 
-@router.get("/accounts/{account_id}")
+@router.get("/accounts/{account_id}", response_model=AccountOut)
 async def get_account(
     account_id: str, session: AsyncSession = Depends(get_session)
-) -> dict:
+) -> AccountOut:
     acct = (
         await session.execute(select(Account).where(Account.id == account_id))
     ).scalar_one_or_none()
     if acct is None:
-        raise HTTPException(status_code=404, detail={"level": "account", "reason": f"Account '{account_id}' not found."})
-    return {"id": acct.id, "name": acct.name, "created_at": acct.created_at.isoformat()}
+        raise HTTPException(
+            status_code=404,
+            detail={"level": "account", "reason": f"Account '{account_id}' not found."},
+        )
+    return AccountOut(id=acct.id, name=acct.name, created_at=acct.created_at)
 
 
 # ---------------------------------------------------------------------------
@@ -106,11 +147,11 @@ class UpsertRequest(BaseModel):
     account_id: str | None = None
 
 
-@router.put("/box/upsert", status_code=201)
+@router.put("/box/upsert", status_code=201, response_model=UpsertOut)
 async def upsert(
     body: UpsertRequest,
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> UpsertOut:
     """File a joke into the path the caller supplies.
 
     Creates cabinet, drawer, and file if they do not exist.
@@ -181,20 +222,20 @@ async def upsert(
     session.add(joke)
     await session.commit()
 
-    return {
-        "joke_id": joke_id,
-        "cabinet_id": cab.id,
-        "drawer_id": drw.id,
-        "file_id": fil.id,
-    }
+    return UpsertOut(
+        joke_id=joke_id,
+        cabinet_id=cab.id,
+        drawer_id=drw.id,
+        file_id=fil.id,
+    )
 
 
 # ---------------------------------------------------------------------------
-# Hierarchy reads
+# Hierarchy reads — tree
 # ---------------------------------------------------------------------------
 
-@router.get("/box")
-async def get_box(session: AsyncSession = Depends(get_session)) -> dict:
+@router.get("/box", response_model=TreeOut)
+async def get_box(session: AsyncSession = Depends(get_session)) -> TreeOut:
     cabs = (await session.execute(select(Cabinet))).scalars().all()
     result = []
     for cab in cabs:
@@ -206,29 +247,31 @@ async def get_box(session: AsyncSession = Depends(get_session)) -> dict:
             for fil in (
                 await session.execute(select(File).where(File.drawer_id == drw.id))
             ).scalars().all():
-                jokes = (
-                    await session.execute(select(Joke).where(Joke.file_id == fil.id))
-                ).scalars().all()
-                files.append({
-                    "id": fil.id,
-                    "label": fil.label,
-                    "joke_count": len(jokes),
-                })
+                joke_count = (
+                    await session.execute(
+                        select(func.count()).select_from(Joke).where(Joke.file_id == fil.id)
+                    )
+                ).scalar() or 0
+                files.append({"id": fil.id, "label": fil.label, "joke_count": joke_count})
             drawers.append({"id": drw.id, "label": drw.label, "files": files})
         result.append({"id": cab.id, "label": cab.label, "drawers": drawers})
-    return {"cabinets": result}
+    return TreeOut.model_validate({"cabinets": result})
 
 
-@router.get("/cabinets")
-async def list_cabinets(session: AsyncSession = Depends(get_session)) -> dict:
+# ---------------------------------------------------------------------------
+# Hierarchy reads — cabinets
+# ---------------------------------------------------------------------------
+
+@router.get("/cabinets", response_model=CabinetListOut)
+async def list_cabinets(session: AsyncSession = Depends(get_session)) -> CabinetListOut:
     rows = (await session.execute(select(Cabinet))).scalars().all()
-    return {"cabinets": [{"id": r.id, "label": r.label} for r in rows]}
+    return CabinetListOut(cabinets=[{"id": r.id, "label": r.label} for r in rows])
 
 
-@router.get("/cabinets/{cabinet_id}")
+@router.get("/cabinets/{cabinet_id}", response_model=CabinetDetailOut)
 async def get_cabinet(
     cabinet_id: str, session: AsyncSession = Depends(get_session)
-) -> dict:
+) -> CabinetDetailOut:
     cab = (
         await session.execute(select(Cabinet).where(Cabinet.id == cabinet_id))
     ).scalar_one_or_none()
@@ -237,17 +280,66 @@ async def get_cabinet(
     drawers = (
         await session.execute(select(Drawer).where(Drawer.cabinet_id == cab.id))
     ).scalars().all()
-    return {
-        "id": cab.id,
-        "label": cab.label,
-        "drawers": [{"id": d.id, "label": d.label} for d in drawers],
-    }
+    return CabinetDetailOut(
+        id=cab.id,
+        label=cab.label,
+        drawers=[{"id": d.id, "label": d.label} for d in drawers],
+    )
 
 
-@router.get("/drawers/{drawer_id}")
+@router.get("/cabinets/{cabinet_id}/counts", response_model=CabinetCountsOut)
+async def cabinet_counts(
+    cabinet_id: str, session: AsyncSession = Depends(get_session)
+) -> CabinetCountsOut:
+    """Count of drawers, files, and jokes under a cabinet."""
+    cab = (
+        await session.execute(select(Cabinet).where(Cabinet.id == cabinet_id))
+    ).scalar_one_or_none()
+    if cab is None:
+        raise _level_error("cabinet", f"Cabinet '{cabinet_id}' not found.")
+    n_drw = (
+        await session.execute(
+            select(func.count()).select_from(Drawer).where(Drawer.cabinet_id == cabinet_id)
+        )
+    ).scalar() or 0
+    drw_ids = (
+        await session.execute(select(Drawer.id).where(Drawer.cabinet_id == cabinet_id))
+    ).scalars().all()
+    n_fil = (
+        await session.execute(
+            select(func.count()).select_from(File).where(File.drawer_id.in_(drw_ids))
+        )
+    ).scalar() or 0
+    fil_ids = (
+        await session.execute(select(File.id).where(File.drawer_id.in_(drw_ids)))
+    ).scalars().all()
+    n_jokes = (
+        await session.execute(
+            select(func.count()).select_from(Joke).where(Joke.file_id.in_(fil_ids))
+        )
+    ).scalar() or 0
+    return CabinetCountsOut(
+        cabinet_id=cabinet_id, drawers=n_drw, files=n_fil, jokes=n_jokes
+    )
+
+
+# ---------------------------------------------------------------------------
+# Hierarchy reads — drawers
+# ---------------------------------------------------------------------------
+
+@router.get("/drawers", response_model=DrawerListOut)
+async def list_drawers(session: AsyncSession = Depends(get_session)) -> DrawerListOut:
+    """List all drawers across all cabinets."""
+    rows = (await session.execute(select(Drawer))).scalars().all()
+    return DrawerListOut(
+        drawers=[{"id": r.id, "label": r.label, "cabinet_id": r.cabinet_id} for r in rows]
+    )
+
+
+@router.get("/drawers/{drawer_id}", response_model=DrawerDetailOut)
 async def get_drawer(
     drawer_id: str, session: AsyncSession = Depends(get_session)
-) -> dict:
+) -> DrawerDetailOut:
     drw = (
         await session.execute(select(Drawer).where(Drawer.id == drawer_id))
     ).scalar_one_or_none()
@@ -256,18 +348,48 @@ async def get_drawer(
     files = (
         await session.execute(select(File).where(File.drawer_id == drw.id))
     ).scalars().all()
-    return {
-        "id": drw.id,
-        "label": drw.label,
-        "cabinet_id": drw.cabinet_id,
-        "files": [{"id": f.id, "label": f.label} for f in files],
-    }
+    return DrawerDetailOut(
+        id=drw.id,
+        label=drw.label,
+        cabinet_id=drw.cabinet_id,
+        files=[{"id": f.id, "label": f.label} for f in files],
+    )
 
 
-@router.get("/files/{file_id}")
+@router.get("/drawers/{drawer_id}/counts", response_model=DrawerCountsOut)
+async def drawer_counts(
+    drawer_id: str, session: AsyncSession = Depends(get_session)
+) -> DrawerCountsOut:
+    """Count of files and jokes under a drawer."""
+    drw = (
+        await session.execute(select(Drawer).where(Drawer.id == drawer_id))
+    ).scalar_one_or_none()
+    if drw is None:
+        raise _level_error("drawer", f"Drawer '{drawer_id}' not found.")
+    n_fil = (
+        await session.execute(
+            select(func.count()).select_from(File).where(File.drawer_id == drawer_id)
+        )
+    ).scalar() or 0
+    fil_ids = (
+        await session.execute(select(File.id).where(File.drawer_id == drawer_id))
+    ).scalars().all()
+    n_jokes = (
+        await session.execute(
+            select(func.count()).select_from(Joke).where(Joke.file_id.in_(fil_ids))
+        )
+    ).scalar() or 0
+    return DrawerCountsOut(drawer_id=drawer_id, files=n_fil, jokes=n_jokes)
+
+
+# ---------------------------------------------------------------------------
+# Hierarchy reads — files
+# ---------------------------------------------------------------------------
+
+@router.get("/files/{file_id}", response_model=FileDetailOut)
 async def get_file(
     file_id: str, session: AsyncSession = Depends(get_session)
-) -> dict:
+) -> FileDetailOut:
     fil = (
         await session.execute(select(File).where(File.id == file_id))
     ).scalar_one_or_none()
@@ -276,30 +398,52 @@ async def get_file(
     jokes = (
         await session.execute(select(Joke).where(Joke.file_id == fil.id))
     ).scalars().all()
-    return {
-        "id": fil.id,
-        "label": fil.label,
-        "drawer_id": fil.drawer_id,
-        "jokes": [{"id": j.id, "score": j.score} for j in jokes],
-    }
+    return FileDetailOut(
+        id=fil.id,
+        label=fil.label,
+        drawer_id=fil.drawer_id,
+        jokes=[{"id": j.id, "score": j.score} for j in jokes],
+    )
 
 
-@router.get("/jokes/{joke_id}")
+@router.get("/files/{file_id}/counts", response_model=FileCountsOut)
+async def file_counts(
+    file_id: str, session: AsyncSession = Depends(get_session)
+) -> FileCountsOut:
+    """Count of jokes in a file."""
+    fil = (
+        await session.execute(select(File).where(File.id == file_id))
+    ).scalar_one_or_none()
+    if fil is None:
+        raise _level_error("file", f"File '{file_id}' not found.")
+    n_jokes = (
+        await session.execute(
+            select(func.count()).select_from(Joke).where(Joke.file_id == file_id)
+        )
+    ).scalar() or 0
+    return FileCountsOut(file_id=file_id, jokes=n_jokes)
+
+
+# ---------------------------------------------------------------------------
+# Jokes
+# ---------------------------------------------------------------------------
+
+@router.get("/jokes/{joke_id}", response_model=JokeOut)
 async def get_joke(
     joke_id: str, session: AsyncSession = Depends(get_session)
-) -> dict:
+) -> JokeOut:
     joke = (
         await session.execute(select(Joke).where(Joke.id == joke_id))
     ).scalar_one_or_none()
     if joke is None:
         raise _level_error("joke", f"Joke '{joke_id}' not found.")
-    return _joke_to_dict(joke)
+    return JokeOut.model_validate(_joke_to_dict(joke))
 
 
-@router.get("/jokes/{joke_id}/trace")
+@router.get("/jokes/{joke_id}/trace", response_model=TraceOut)
 async def get_joke_trace(
     joke_id: str, session: AsyncSession = Depends(get_session)
-) -> dict:
+) -> TraceOut:
     joke = (
         await session.execute(select(Joke).where(Joke.id == joke_id))
     ).scalar_one_or_none()
@@ -310,9 +454,9 @@ async def get_joke_trace(
             select(Trace).where(Trace.artifact_id == joke_id).order_by(Trace.created_at)
         )
     ).scalars().all()
-    return {
-        "joke_id": joke_id,
-        "steps": [
+    return TraceOut(
+        joke_id=joke_id,
+        steps=[
             {
                 "id": t.id,
                 "kind": t.kind,
@@ -322,20 +466,20 @@ async def get_joke_trace(
             }
             for t in traces
         ],
-    }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Path read
 # ---------------------------------------------------------------------------
 
-@router.get("/box/{cabinet}/{drawer}/{file}")
+@router.get("/box/{cabinet}/{drawer}/{file}", response_model=PathReadOut)
 async def read_by_path(
     cabinet: str,
     drawer: str,
     file: str,
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> PathReadOut:
     """Return all jokes at a specific cabinet/drawer/file path."""
     cab = (
         await session.execute(select(Cabinet).where(Cabinet.label == cabinet))
@@ -359,24 +503,24 @@ async def read_by_path(
     jokes = (
         await session.execute(select(Joke).where(Joke.file_id == fil.id))
     ).scalars().all()
-    return {
+    return PathReadOut.model_validate({
         "cabinet": {"id": cab.id, "label": cab.label},
         "drawer": {"id": drw.id, "label": drw.label},
         "file": {"id": fil.id, "label": fil.label},
         "jokes": [_joke_to_dict(j) for j in jokes],
-    }
+    })
 
 
 # ---------------------------------------------------------------------------
 # Funniest in genre
 # ---------------------------------------------------------------------------
 
-@router.get("/genres/{genre}/funniest")
+@router.get("/genres/{genre}/funniest", response_model=FunniestOut)
 async def funniest_in_genre(
     genre: str,
     n: int = Query(default=5, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> FunniestOut:
     """Return up to n highest-scoring jokes in the given genre (category)."""
     jokes = (
         await session.execute(
@@ -386,15 +530,17 @@ async def funniest_in_genre(
             .limit(n)
         )
     ).scalars().all()
-    return {"genre": genre, "jokes": [_joke_to_dict(j) for j in jokes]}
+    return FunniestOut.model_validate(
+        {"genre": genre, "jokes": [_joke_to_dict(j) for j in jokes]}
+    )
 
 
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
 
-@router.get("/export")
-async def export(session: AsyncSession = Depends(get_session)) -> dict:
+@router.get("/export", response_model=ExportOut)
+async def export(session: AsyncSession = Depends(get_session)) -> ExportOut:
     """Full library export: every cabinet, drawer, file, and joke as JSON."""
     cabs = (await session.execute(select(Cabinet))).scalars().all()
     result = []
@@ -417,99 +563,15 @@ async def export(session: AsyncSession = Depends(get_session)) -> dict:
                 })
             drawers.append({"id": drw.id, "label": drw.label, "files": files})
         result.append({"id": cab.id, "label": cab.label, "drawers": drawers})
-    return {"cabinets": result}
-
-
-# ---------------------------------------------------------------------------
-# Scoped counts
-# ---------------------------------------------------------------------------
-
-@router.get("/cabinets/{cabinet_id}/counts")
-async def cabinet_counts(
-    cabinet_id: str, session: AsyncSession = Depends(get_session)
-) -> dict:
-    """Count of drawers, files, and jokes under a cabinet."""
-    cab = (
-        await session.execute(select(Cabinet).where(Cabinet.id == cabinet_id))
-    ).scalar_one_or_none()
-    if cab is None:
-        raise _level_error("cabinet", f"Cabinet '{cabinet_id}' not found.")
-    n_drw = (
-        await session.execute(
-            select(func.count()).select_from(Drawer).where(Drawer.cabinet_id == cabinet_id)
-        )
-    ).scalar()
-    drw_ids = (
-        await session.execute(select(Drawer.id).where(Drawer.cabinet_id == cabinet_id))
-    ).scalars().all()
-    n_fil = (
-        await session.execute(
-            select(func.count()).select_from(File).where(File.drawer_id.in_(drw_ids))
-        )
-    ).scalar()
-    fil_ids = (
-        await session.execute(
-            select(File.id).where(File.drawer_id.in_(drw_ids))
-        )
-    ).scalars().all()
-    n_jokes = (
-        await session.execute(
-            select(func.count()).select_from(Joke).where(Joke.file_id.in_(fil_ids))
-        )
-    ).scalar()
-    return {"cabinet_id": cabinet_id, "drawers": n_drw, "files": n_fil, "jokes": n_jokes}
-
-
-@router.get("/drawers/{drawer_id}/counts")
-async def drawer_counts(
-    drawer_id: str, session: AsyncSession = Depends(get_session)
-) -> dict:
-    """Count of files and jokes under a drawer."""
-    drw = (
-        await session.execute(select(Drawer).where(Drawer.id == drawer_id))
-    ).scalar_one_or_none()
-    if drw is None:
-        raise _level_error("drawer", f"Drawer '{drawer_id}' not found.")
-    n_fil = (
-        await session.execute(
-            select(func.count()).select_from(File).where(File.drawer_id == drawer_id)
-        )
-    ).scalar()
-    fil_ids = (
-        await session.execute(select(File.id).where(File.drawer_id == drawer_id))
-    ).scalars().all()
-    n_jokes = (
-        await session.execute(
-            select(func.count()).select_from(Joke).where(Joke.file_id.in_(fil_ids))
-        )
-    ).scalar()
-    return {"drawer_id": drawer_id, "files": n_fil, "jokes": n_jokes}
-
-
-@router.get("/files/{file_id}/counts")
-async def file_counts(
-    file_id: str, session: AsyncSession = Depends(get_session)
-) -> dict:
-    """Count of jokes in a file."""
-    fil = (
-        await session.execute(select(File).where(File.id == file_id))
-    ).scalar_one_or_none()
-    if fil is None:
-        raise _level_error("file", f"File '{file_id}' not found.")
-    n_jokes = (
-        await session.execute(
-            select(func.count()).select_from(Joke).where(Joke.file_id == file_id)
-        )
-    ).scalar()
-    return {"file_id": file_id, "jokes": n_jokes}
+    return ExportOut.model_validate({"cabinets": result})
 
 
 # ---------------------------------------------------------------------------
 # Compliance
 # ---------------------------------------------------------------------------
 
-@router.get("/compliance")
-async def compliance(session: AsyncSession = Depends(get_session)) -> dict:
+@router.get("/compliance", response_model=ComplianceOut)
+async def compliance(session: AsyncSession = Depends(get_session)) -> ComplianceOut:
     """Live hierarchy compliance check.  Never a stored flag."""
     violations = []
 
@@ -533,7 +595,12 @@ async def compliance(session: AsyncSession = Depends(get_session)) -> dict:
     # Drawers with fewer than 2 files
     drw_file_counts = (
         await session.execute(
-            select(Drawer.id, Drawer.label, Cabinet.label.label("cab_label"), func.count(File.id).label("n"))
+            select(
+                Drawer.id,
+                Drawer.label,
+                Cabinet.label.label("cab_label"),
+                func.count(File.id).label("n"),
+            )
             .join(Cabinet, Cabinet.id == Drawer.cabinet_id)
             .outerjoin(File, File.drawer_id == Drawer.id)
             .group_by(Drawer.id, Drawer.label, Cabinet.label)
@@ -573,25 +640,22 @@ async def compliance(session: AsyncSession = Depends(get_session)) -> dict:
                 "reason": f"File '{fil_label}' has {n} joke(s); requires more than one.",
             })
 
-    return {"compliant": len(violations) == 0, "violations": violations}
+    return ComplianceOut.model_validate(
+        {"compliant": len(violations) == 0, "violations": violations}
+    )
 
 
 # ---------------------------------------------------------------------------
 # Counts
 # ---------------------------------------------------------------------------
 
-@router.get("/counts")
-async def counts(session: AsyncSession = Depends(get_session)) -> dict:
-    n_cabs = (await session.execute(select(func.count()).select_from(Cabinet))).scalar()
-    n_drws = (await session.execute(select(func.count()).select_from(Drawer))).scalar()
-    n_fils = (await session.execute(select(func.count()).select_from(File))).scalar()
-    n_jokes = (await session.execute(select(func.count()).select_from(Joke))).scalar()
-    return {
-        "cabinets": n_cabs,
-        "drawers": n_drws,
-        "files": n_fils,
-        "jokes": n_jokes,
-    }
+@router.get("/counts", response_model=GlobalCountsOut)
+async def counts(session: AsyncSession = Depends(get_session)) -> GlobalCountsOut:
+    n_cabs = (await session.execute(select(func.count()).select_from(Cabinet))).scalar() or 0
+    n_drws = (await session.execute(select(func.count()).select_from(Drawer))).scalar() or 0
+    n_fils = (await session.execute(select(func.count()).select_from(File))).scalar() or 0
+    n_jokes = (await session.execute(select(func.count()).select_from(Joke))).scalar() or 0
+    return GlobalCountsOut(cabinets=n_cabs, drawers=n_drws, files=n_fils, jokes=n_jokes)
 
 
 # ---------------------------------------------------------------------------
