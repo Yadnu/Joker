@@ -39,7 +39,11 @@ async def test_round_trip_all_fields(client):
     assert got["user_reaction"] == j["user_reaction"]
     assert got["score"] == j["score"]
     assert got["category"] == j["category"]
-    assert got["user_context"] == j["user_context"]
+
+    # user_context: structured object — check the fields we supplied
+    # (response includes all optional fields; compare only what was sent)
+    for key, val in j["user_context"].items():
+        assert got["user_context"][key] == val, f"user_context.{key} mismatch"
 
     # Nested: prompt_responses
     assert got["prompt_responses"] == j["prompt_responses"]

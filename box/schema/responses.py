@@ -16,7 +16,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from box.schema.records import Attribution, JokeMetadata, PromptTurn, Provenance, SetId
+from box.schema.records import Attribution, JokeMetadata, PromptTurn, Provenance, SetId, UserContext
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ class JokeOut(BaseModel):
     score: int
     category: str
     metadata: JokeMetadata
-    user_context: str
+    user_context: UserContext
     attribution: Attribution
     provenance: Provenance
     set_id: SetId

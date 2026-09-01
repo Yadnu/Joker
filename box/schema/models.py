@@ -142,7 +142,9 @@ class Joke(Base):
     # "metadata" is reserved by SQLAlchemy Declarative; column name stays
     # "metadata" in the DB but the Python attribute is "joke_metadata".
     joke_metadata: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False)
-    user_context: Mapped[str] = mapped_column(Text, nullable=False)
+    # Structured per-session listener snapshot (UserContext Pydantic model).
+    # Stored as JSONB so all optional sub-fields are first-class queryable keys.
+    user_context: Mapped[dict] = mapped_column(JSONB, nullable=False)
     attribution: Mapped[dict] = mapped_column(JSONB, nullable=False)
     provenance: Mapped[dict] = mapped_column(JSONB, nullable=False)
     set_id: Mapped[dict] = mapped_column(JSONB, nullable=False)

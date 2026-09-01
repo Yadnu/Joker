@@ -137,3 +137,39 @@
 **Reason:** Sub-resource URLs are idiomatic REST and avoid a combinatorial query-param surface. Each endpoint does a small targeted query.
 
 **Cost:** Three extra route declarations; global `/counts` and scoped endpoints are not unified, so a refactor is needed if the counting logic grows complex.
+
+---
+
+### 2026-09-01 Listener detail lives in user_context, not on Account
+
+**Decision:** `user_context` (a `UserContext` JSONB object) on `Joke` carries all per-session listener information. The `Account` model stays minimal: `id`, `name`, `created_at`. No listener fields are added to accounts.
+
+**Alternatives:** Add listener profile columns to `Account` so a single account carries the full audience picture; or create a separate `ListenerProfile` entity linked to accounts.
+
+**Reason:** Accounts identify Jokers and Librarians writing to the shared library — they are attribution, not audience. One account runs many sessions with many different listeners. Mixing attribution and audience on the same row would make it impossible to run the same account with different listener types without creating a new account, and would leak listener data into the write-side record.
+
+**Cost:** Listener context is not persistent across sessions — each new session must re-supply `user_context`. There is no listener history beyond what the Joker explicitly records in `session_notes`.
+
+---
+
+### 2026-09-01 Age stored as a band, not a date of birth or exact age
+
+**Decision:** `UserContext.age_band` is one of `under_25 / 25_40 / 40_60 / over_60`. Date of birth and exact age are explicitly excluded from the model with a comment.
+
+**Alternatives:** Store a date of birth (precise, derivable); store an exact integer age (precise but ages out of date); store a free-text string (flexible but unqueryable).
+
+**Reason:** Comedy references land generationally, so a band is all that is actually useful for the Librarian's angle selection. A date of birth would violate the brief's "light, non-identifying" requirement, and an exact age becomes stale. The band is stable for years and is non-identifying — many thousands of people share any given band.
+
+**Cost:** Coarser personalization than exact age would allow. A generational reference that is right for a 28-year-old may miss a 38-year-old in the same band. Accepted because the brief explicitly prioritises non-identification over precision.
+
+---
+
+### 2026-09-01 humor_preferences / humor_avoid share vocabulary with sensitivity_flags
+
+**Decision:** `HumorStyle` is a single enum used for `UserContext.humor_preferences`, `UserContext.humor_avoid`, and `JokeMetadata.sensitivity_flags`. All three reference the same eight values: wordplay, observational, absurdist, deadpan, dark, physical, self_deprecating, topical.
+
+**Alternatives:** Keep sensitivity_flags as `list[str]` (open-ended) and define a separate preference enum; or maintain separate vocabularies and add a translation layer in the Audience Categorizer.
+
+**Reason:** The brief states the Audience Categorizer will map listener traits onto sensitivity flags. Sharing one enum makes that mapping direct: `listener.humor_avoid = ["dark"]` and `joke.metadata.sensitivity_flags = ["dark"]` are directly comparable without translation. A translation layer would be an untested runtime dependency.
+
+**Cost:** The vocabulary is now fixed at eight values. Adding a new humor style requires updating the enum and a migration (or accepting that the new value falls through to unvalidated strings).

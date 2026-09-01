@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from box.schema.records import UserContext
+
 INTERFACE_VERSION = "1.0"
 
 
@@ -22,8 +24,8 @@ class SuggestionRequest(BaseModel):
     """What the Joker knows about this listener before generation begins."""
 
     version: str = INTERFACE_VERSION
-    user_context: str = Field(
-        description="Light, non-identifying notes about the listener."
+    user_context: UserContext = Field(
+        description="Structured per-session listener snapshot (all fields optional)."
     )
     listener_history: list[str] = Field(
         default_factory=list,

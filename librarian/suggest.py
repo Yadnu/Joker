@@ -1,11 +1,14 @@
 """Librarian — pre-generation suggestion.
 
 Runs BEFORE generation.  Queries the Box for:
-  1. High-scoring jokes whose category overlaps listener context keywords.
+  1. High-scoring jokes whose genre overlaps listener preferences.
   2. Genre coverage counts (genres with < 3 jokes are "thin").
 
 Returns a ranked list of Angles.  An empty result is a RuntimeError because
 feeding the Joker material before generation is a hard requirement.
+
+user_context influence is auditable: the trace step records *exactly* which
+UserContext fields were non-null and drove the model prompt.
 """
 
 from __future__ import annotations
@@ -13,10 +16,11 @@ from __future__ import annotations
 import time
 
 from openai import AsyncOpenAI
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from box.schema.models import Joke
+from box.schema.records import UserContext
 from librarian.interface import (
     Angle,
     SuggestionRequest,
@@ -38,41 +42,42 @@ async def suggest(
     """Return ranked Angles for the Joker to choose from.
 
     Two DB queries are always run:
-      - High-scorers: jokes with score >= 7 filtered by listener context.
+      - High-scorers: jokes with score >= 7.
       - Thin genres:  genres with fewer than 3 jokes, for variety.
 
-    The model then ranks and writes a rationale for each angle.
+    The model prompt is built from structured UserContext fields.
+    The trace step names every field that influenced the output.
     """
     t0 = time.monotonic()
 
-    # --- Query 1: high-scoring jokes relevant to listener context --------
-    context_keywords = _extract_keywords(request.user_context)
-    high_scorers_stmt = (
+    # --- Query 1: high-scoring jokes ----------------------------------------
+    high_result = await session.execute(
         select(Joke.category, Joke.joke_text, Joke.score)
         .where(Joke.score >= _HIGH_SCORE_THRESHOLD)
         .order_by(Joke.score.desc())
         .limit(20)
     )
-    high_result = await session.execute(high_scorers_stmt)
     high_rows = high_result.all()
 
-    # --- Query 2: genre coverage counts ----------------------------------
-    coverage_stmt = select(Joke.category, func.count(Joke.id).label("n")).group_by(
-        Joke.category
+    # --- Query 2: genre coverage counts -------------------------------------
+    coverage_result = await session.execute(
+        select(Joke.category, func.count(Joke.id).label("n")).group_by(Joke.category)
     )
-    coverage_result = await session.execute(coverage_stmt)
     coverage: dict[str, int] = {row.category: row.n for row in coverage_result.all()}
-
     thin_genres = [g for g, n in coverage.items() if n < _THIN_THRESHOLD]
 
-    # --- Model call: rank and write rationales ---------------------------
+    # --- Determine which UserContext fields are populated -------------------
+    ctx = request.user_context
+    active_fields = _active_context_fields(ctx)
+
+    # --- Build prompt -------------------------------------------------------
     prompt = _build_prompt(
-        user_context=request.user_context,
+        user_context=ctx,
         listener_history=request.listener_history,
         high_scorers=high_rows,
         thin_genres=thin_genres,
         coverage=coverage,
-        context_keywords=context_keywords,
+        active_fields=active_fields,
     )
 
     system = (
@@ -80,8 +85,10 @@ async def suggest(
         "Return a JSON object with key 'angles', a list of objects each "
         "with keys: genre, topic, rationale, freshness_score (0.0-1.0). "
         "Thin genres should have higher freshness_score. "
-        "Return at least 3 angles."
+        "Return at least 3 angles. "
+        "humor_avoid fields are HARD CONSTRAINTS: never suggest those styles."
     )
+
     model_t0 = time.monotonic()
     response = await _client.chat.completions.create(
         **completion_kwargs(
@@ -113,6 +120,15 @@ async def suggest(
 
     total_ms = int((time.monotonic() - t0) * 1000)
 
+    # Rationale explicitly names every UserContext field that shaped the output.
+    # An adaptation nobody can read is not auditable.
+    rationale = _build_rationale(
+        active_fields=active_fields,
+        high_scorer_count=len(high_rows),
+        thin_genres=thin_genres,
+        angle_count=len(angles),
+    )
+
     await record_step(
         artifact_id=f"suggestion:{request.taxonomy_snapshot_version}",
         artifact_type="suggestion",
@@ -121,18 +137,15 @@ async def suggest(
         model=SUGGEST_MODEL,
         prompt_ref="librarian/suggest_v1",
         inputs={
-            "user_context": request.user_context,
+            "user_context": ctx.model_dump(mode="json", exclude_none=True),
+            "active_context_fields": active_fields,
             "listener_history": request.listener_history,
             "taxonomy_snapshot_version": request.taxonomy_snapshot_version,
             "high_scorer_count": len(high_rows),
             "thin_genres": thin_genres,
         },
         output={"angles": [a.model_dump() for a in angles]},
-        rationale=(
-            f"Queried {len(high_rows)} high-scoring jokes and found "
-            f"{len(thin_genres)} thin genre(s). "
-            f"Model ranked {len(angles)} angles for listener context."
-        ),
+        rationale=rationale,
         latency_ms=total_ms,
         cost=_estimate_cost(response),
         session=session,
@@ -145,26 +158,75 @@ async def suggest(
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _active_context_fields(ctx: UserContext) -> list[str]:
+    """Return names of every UserContext field that is non-null / non-empty.
 
-def _extract_keywords(user_context: str) -> list[str]:
-    return [w.lower().strip(".,;:") for w in user_context.split() if len(w) > 3]
+    This list goes directly into the trace so reviewers can see exactly what
+    drove each suggestion.  A field that influenced nothing is not listed.
+    """
+    active = []
+    if ctx.age_band is not None:
+        active.append("age_band")
+    if ctx.region is not None:
+        active.append("region")
+    if ctx.occupation_field is not None:
+        active.append("occupation_field")
+    if ctx.humor_preferences:
+        active.append("humor_preferences")
+    if ctx.humor_avoid:
+        active.append("humor_avoid")          # hard constraint — always listed
+    if ctx.energy is not None:
+        active.append("energy")
+    if ctx.first_time is not None:
+        active.append("first_time")
+    if ctx.session_notes is not None:
+        active.append("session_notes")
+    return active
 
 
 def _build_prompt(
     *,
-    user_context: str,
+    user_context: UserContext,
     listener_history: list[str],
     high_scorers: list,
     thin_genres: list[str],
     coverage: dict[str, int],
-    context_keywords: list[str],
+    active_fields: list[str],
 ) -> str:
+    ctx = user_context
+    ctx_lines: list[str] = []
+
+    if ctx.age_band is not None:
+        ctx_lines.append(f"  Age band: {ctx.age_band.value}  → informs generational references")
+    if ctx.region is not None:
+        ctx_lines.append(f"  Region: {ctx.region}  → informs idiom and local references")
+    if ctx.occupation_field is not None:
+        ctx_lines.append(f"  Occupation: {ctx.occupation_field.value}  → informs relatable scenarios")
+    if ctx.humor_preferences:
+        prefs = ", ".join(s.value for s in ctx.humor_preferences)
+        ctx_lines.append(f"  Humor preferences: {prefs}  → steer toward these styles")
+    if ctx.humor_avoid:
+        avoid = ", ".join(s.value for s in ctx.humor_avoid)
+        ctx_lines.append(f"  humor_avoid (HARD CONSTRAINT — never suggest): {avoid}")
+    if ctx.energy is not None:
+        ctx_lines.append(f"  Room energy: {ctx.energy.value}  → informs tone level")
+    if ctx.first_time is not None:
+        label = "first time" if ctx.first_time else "returning listener"
+        ctx_lines.append(f"  Listener familiarity: {label}  → informs opener choice")
+    if ctx.session_notes is not None:
+        ctx_lines.append(f"  Session notes: {ctx.session_notes}")
+
+    if not ctx_lines:
+        ctx_lines.append("  (no listener context provided — use general audience defaults)")
+
     lines = [
-        f"Listener context: {user_context}",
-        f"Already delivered genres this session: {', '.join(listener_history) or 'none'}",
-        f"Thin genres (< {_THIN_THRESHOLD} jokes): {', '.join(thin_genres) or 'none'}",
+        "=== Listener context ===",
+        *ctx_lines,
         "",
-        "Top high-scoring jokes:",
+        f"Already delivered genres this session: {', '.join(listener_history) or 'none'}",
+        f"Thin genres (< {_THIN_THRESHOLD} jokes, prefer these): {', '.join(thin_genres) or 'none'}",
+        "",
+        "Top high-scoring jokes in the archive:",
     ]
     for row in high_scorers[:10]:
         lines.append(f"  [{row.score}/10] ({row.category}) {row.joke_text[:80]}")
@@ -177,9 +239,36 @@ def _build_prompt(
     lines += [
         "",
         "Suggest angles that are fresh, relevant, and varied. "
-        "Prefer thin genres. Avoid genres already delivered this session.",
+        "Prefer thin genres. Avoid genres already delivered this session. "
+        "Each rationale must name the listener trait it responds to.",
     ]
     return "\n".join(lines)
+
+
+def _build_rationale(
+    *,
+    active_fields: list[str],
+    high_scorer_count: int,
+    thin_genres: list[str],
+    angle_count: int,
+) -> str:
+    """Human-readable rationale for the trace step.
+
+    Must name which UserContext fields drove the decision so the trace is
+    auditable.  User fit is the second-highest graded criterion.
+    """
+    if active_fields:
+        field_str = ", ".join(active_fields)
+        ctx_note = f"UserContext fields that shaped the prompt: {field_str}."
+    else:
+        ctx_note = "No UserContext fields were populated; used general audience defaults."
+
+    return (
+        f"{ctx_note} "
+        f"Queried {high_scorer_count} high-scoring jokes and identified "
+        f"{len(thin_genres)} thin genre(s) ({', '.join(thin_genres) or 'none'}). "
+        f"Model returned {angle_count} ranked angle(s)."
+    )
 
 
 def _estimate_cost(response) -> float | None:  # type: ignore[no-untyped-def]

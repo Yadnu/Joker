@@ -36,7 +36,11 @@ def joke_payload(
                 "length": "short",
                 "sensitivity_flags": [],
             },
-            "user_context": "Software engineer; enjoys dry humour.",
+            "user_context": {
+                "occupation_field": "tech",
+                "humor_preferences": ["observational", "deadpan"],
+                "energy": "dry",
+            },
             "attribution": {"joker": "joker-v1", "account": "acct_test"},
             "provenance": {
                 "source": "generated",
