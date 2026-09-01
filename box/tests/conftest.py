@@ -54,6 +54,7 @@ os.environ["TEST_DATABASE_URL"] = _test_url
 from box.main import app  # noqa: E402
 from box.schema.models import Base  # noqa: E402
 import shared.db as _db_module  # noqa: E402
+import uuid  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Test database URL
@@ -110,12 +111,32 @@ async def db(test_session_factory) -> AsyncSession:
 
 @pytest_asyncio.fixture
 async def client(test_session_factory) -> AsyncClient:
-    """AsyncClient that uses the test DB session factory."""
+    """AsyncClient wired to the test DB, pre-authenticated with a fresh account.
+
+    Each test gets its own account (unique name) so that bearer-required routes
+    work out of the box without any per-test boilerplate.  Tests that need a
+    second account can POST /accounts and pass the returned key as a per-request
+    Authorization header override.
+    """
     original_factory = _db_module.SessionFactory
     _db_module.SessionFactory = test_session_factory  # type: ignore[assignment]
 
+    # Create a bootstrap account using a plain (unauthenticated) client.
+    # POST /accounts is intentionally open so accounts can be created without
+    # a prior key (bootstrapping).
+    unique_name = f"__fixture_{uuid.uuid4().hex[:12]}__"
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
+    ) as bootstrap:
+        r = await bootstrap.post("/accounts", json={"name": unique_name})
+        assert r.status_code == 201, f"fixture account creation failed: {r.text}"
+        api_key = r.json()["api_key"]
+
+    # Main client includes the bearer header on every request.
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {api_key}"},
     ) as ac:
         yield ac
 

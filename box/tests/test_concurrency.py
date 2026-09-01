@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import uuid
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 
 
-def _run_upsert(url: str, payload: dict, results: list, idx: int) -> None:
+def _run_upsert(url: str, payload: dict, api_key: str, results: list, idx: int) -> None:
     """Run one upsert from a real OS thread with its own event loop."""
     import httpx
 
@@ -27,7 +29,11 @@ def _run_upsert(url: str, payload: dict, results: list, idx: int) -> None:
     try:
         async def _do() -> dict:
             async with httpx.AsyncClient(base_url=url, timeout=30) as ac:
-                r = await ac.put("/box/upsert", json=payload)
+                r = await ac.put(
+                    "/box/upsert",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
                 return {"status": r.status_code, "body": r.json()}
 
         results[idx] = loop.run_until_complete(_do())
@@ -44,8 +50,8 @@ async def test_concurrent_upsert_same_path(test_session_factory):
     from shared import db as db_module
 
     # The test_session_factory is bound to the pytest session event loop.
-    # Uvicorn runs on its own loop, so we must let it create its own factory
-    # from DATABASE_URL (already set to the test URL by conftest).
+    # Let uvicorn create its own session factory bound to its own event loop.
+    # DATABASE_URL is already set to the test DB URL by conftest.
     original_factory = db_module.SessionFactory
     db_module.SessionFactory = None  # type: ignore[assignment]
 
@@ -67,6 +73,16 @@ async def test_concurrent_upsert_same_path(test_session_factory):
     port = server.servers[0].sockets[0].getsockname()[1]
     base_url = f"http://127.0.0.1:{port}"
 
+    # Create the account THROUGH UVICORN so it is in the same connection pool
+    # that will validate the bearer token.  Using a separate engine or the ASGI
+    # transport risks a cross-pool visibility gap.
+    import httpx
+    race_name = f"__race_{uuid.uuid4().hex[:8]}__"
+    async with httpx.AsyncClient(base_url=base_url, timeout=10) as setup:
+        r_acct = await setup.post("/accounts", json={"name": race_name})
+        assert r_acct.status_code == 201, f"Race account creation failed: {r_acct.text}"
+        race_key = r_acct.json()["api_key"]
+
     from box.tests.helpers import joke_payload
 
     shared_path = {
@@ -80,8 +96,8 @@ async def test_concurrent_upsert_same_path(test_session_factory):
 
     results = [None, None]
 
-    t1 = threading.Thread(target=_run_upsert, args=(base_url, p1, results, 0))
-    t2 = threading.Thread(target=_run_upsert, args=(base_url, p2, results, 1))
+    t1 = threading.Thread(target=_run_upsert, args=(base_url, p1, race_key, results, 0))
+    t2 = threading.Thread(target=_run_upsert, args=(base_url, p2, race_key, results, 1))
 
     t1.start()
     t2.start()

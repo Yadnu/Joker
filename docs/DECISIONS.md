@@ -164,6 +164,30 @@
 
 ---
 
+### 2026-09-01 API key hashed at rest; plaintext shown once at creation
+
+**Decision:** `POST /accounts` generates `jbx_<secrets.token_urlsafe(32)>`, stores only `sha256(key)` in an indexed column, and returns the plaintext once in the creation response. The column is named `api_key_hash`; the plaintext is never retrievable again. Validation hashes the incoming bearer token and compares hashes.
+
+**Alternatives:** Store plaintext (simpler); use bcrypt/argon2 (stronger); use a separate secrets service.
+
+**Reason:** sha256 is appropriate here because the key space (`token_urlsafe(32)` = 256 bits) makes brute-force infeasible — the security comes from key entropy, not from key-stretching. Plaintext in the DB is a direct credential leak; bcrypt/argon2 would add latency on every request with no practical gain given the key strength.
+
+**Cost:** If a user loses their key, there is no recovery path — they must create a new account. The old account's jokes remain attributed to it but no new jokes can be filed under it.
+
+---
+
+### 2026-09-01 Bearer enforcement on write routes only; reads remain open
+
+**Decision:** `PUT /box/upsert` requires `Authorization: Bearer <key>`. The `require_account` dependency resolves the key to an `Account` object and supplies it to the route. Account creation (`POST /accounts`) is exempt — it is the bootstrapping step. All read routes remain open; accounts scope attribution, not visibility.
+
+**Alternatives:** Require auth on all routes; use API-key query parameter; use JWT.
+
+**Reason:** The brief states accounts scope attribution only, not visibility. Enforcing auth on reads would contradict that. Query parameters are logged in server logs and browser history — bearer headers are not. JWT adds a session layer the brief explicitly excludes.
+
+**Cost:** Read endpoints are public; any caller can read the full library. This is intentional per the brief ("every account can read the entire library") but means the archive is not private.
+
+---
+
 ### 2026-09-01 humor_preferences / humor_avoid share vocabulary with sensitivity_flags
 
 **Decision:** `HumorStyle` is a single enum used for `UserContext.humor_preferences`, `UserContext.humor_avoid`, and `JokeMetadata.sensitivity_flags`. All three reference the same eight values: wordplay, observational, absurdist, deadpan, dark, physical, self_deprecating, topical.

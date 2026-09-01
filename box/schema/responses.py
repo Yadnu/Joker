@@ -42,9 +42,17 @@ class HealthOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 class AccountOut(BaseModel):
+    """Returned by GET /accounts and GET /accounts/{id}.  Key is never included."""
     id: str
     name: str
-    api_key: str
+    created_at: datetime
+
+
+class AccountCreateOut(BaseModel):
+    """Returned only by POST /accounts.  api_key is shown exactly once."""
+    id: str
+    name: str
+    api_key: str   # plaintext; store it now — it cannot be retrieved again
     created_at: datetime
 
 

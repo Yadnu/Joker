@@ -29,10 +29,13 @@ The Box stores what it is handed; it does not infer, default, or repair paths.
 
 from __future__ import annotations
 
+import hashlib
+import secrets
 import uuid
 from datetime import datetime, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -41,6 +44,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from box.schema.models import Account, Cabinet, Drawer, File, Joke, Trace
 from box.schema.records import JokeRecord
 from box.schema.responses import (
+    AccountCreateOut,
     AccountListOut,
     AccountOut,
     CabinetCountsOut,
@@ -76,6 +80,47 @@ def _level_error(level: str, reason: str, status: int = 404) -> HTTPException:
 
 
 # ---------------------------------------------------------------------------
+# Authentication — Bearer key dependency
+# ---------------------------------------------------------------------------
+
+def _hash_key(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+async def require_account(
+    authorization: Annotated[str | None, Header()] = None,
+    session: AsyncSession = Depends(get_session),
+) -> Account:
+    """Resolve an Authorization: Bearer <key> header to an Account.
+
+    Applied to every write route.  Read routes remain open.
+    Returns 401 with a body stating the reason if the header is absent or
+    the key does not match any account.
+    """
+    if authorization is None:
+        raise HTTPException(
+            status_code=401,
+            detail={"reason": "Missing Authorization header. Supply 'Authorization: Bearer <key>'."},
+        )
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail={"reason": "Authorization header must use the 'Bearer <key>' scheme."},
+        )
+    raw_key = authorization.removeprefix("Bearer ").strip()
+    key_hash = _hash_key(raw_key)
+    acct = (
+        await session.execute(select(Account).where(Account.api_key_hash == key_hash))
+    ).scalar_one_or_none()
+    if acct is None:
+        raise HTTPException(
+            status_code=401,
+            detail={"reason": "Invalid or unknown API key."},
+        )
+    return acct
+
+
+# ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
 
@@ -92,12 +137,16 @@ class AccountCreate(BaseModel):
     name: str
 
 
-@router.post("/accounts", status_code=201, response_model=AccountOut)
+@router.post("/accounts", status_code=201, response_model=AccountCreateOut)
 async def create_account(
     body: AccountCreate,
     session: AsyncSession = Depends(get_session),
-) -> AccountOut:
-    """Register a new account.  Names must be unique."""
+) -> AccountCreateOut:
+    """Register a new account.
+
+    Returns the plaintext API key exactly once in the response.
+    The key is not stored; only its sha256 hash is kept.
+    """
     existing = (
         await session.execute(select(Account).where(Account.name == body.name))
     ).scalar_one_or_none()
@@ -106,17 +155,20 @@ async def create_account(
             status_code=409,
             detail={"reason": f"Account '{body.name}' already exists."},
         )
-    acct = Account(name=body.name)
+    raw_key = "jbx_" + secrets.token_urlsafe(32)
+    acct = Account(name=body.name, api_key_hash=_hash_key(raw_key))
     session.add(acct)
     await session.commit()
-    return AccountOut(id=acct.id, name=acct.name, api_key=acct.api_key, created_at=acct.created_at)
+    return AccountCreateOut(
+        id=acct.id, name=acct.name, api_key=raw_key, created_at=acct.created_at
+    )
 
 
 @router.get("/accounts", response_model=AccountListOut)
 async def list_accounts(session: AsyncSession = Depends(get_session)) -> AccountListOut:
     rows = (await session.execute(select(Account))).scalars().all()
     return AccountListOut(
-        accounts=[AccountOut(id=r.id, name=r.name, api_key=r.api_key, created_at=r.created_at) for r in rows]
+        accounts=[AccountOut(id=r.id, name=r.name, created_at=r.created_at) for r in rows]
     )
 
 
@@ -132,7 +184,7 @@ async def get_account(
             status_code=404,
             detail={"level": "account", "reason": f"Account '{account_id}' not found."},
         )
-    return AccountOut(id=acct.id, name=acct.name, api_key=acct.api_key, created_at=acct.created_at)
+    return AccountOut(id=acct.id, name=acct.name, created_at=acct.created_at)
 
 
 # ---------------------------------------------------------------------------
@@ -144,12 +196,14 @@ class UpsertRequest(BaseModel):
     drawer: str
     file: str
     joke: JokeRecord
-    account_id: str | None = None
+    # account_id is intentionally absent: attribution comes from the bearer
+    # token resolved by require_account, not from the request body.
 
 
 @router.put("/box/upsert", status_code=201, response_model=UpsertOut)
 async def upsert(
     body: UpsertRequest,
+    account: Account = Depends(require_account),
     session: AsyncSession = Depends(get_session),
 ) -> UpsertOut:
     """File a joke into the path the caller supplies.
@@ -203,10 +257,14 @@ async def upsert(
     # Joke
     joke_id = str(uuid.uuid4())
     record = body.joke
+    # Attribution: joker comes from the request body; account is always
+    # resolved from the bearer token so it cannot be spoofed.
+    attribution = record.attribution.model_dump()
+    attribution["account"] = account.name
     joke = Joke(
         id=joke_id,
         file_id=fil.id,
-        account_id=body.account_id,
+        account_id=account.id,          # from bearer, never from body
         prompt_responses=[t.model_dump() for t in record.prompt_responses],
         joke_text=record.joke_text,
         user_reaction=record.user_reaction,
@@ -214,7 +272,7 @@ async def upsert(
         category=record.category,
         joke_metadata=record.metadata.model_dump(mode="json"),
         user_context=record.user_context.model_dump(mode="json"),
-        attribution=record.attribution.model_dump(),
+        attribution=attribution,        # account field overridden above
         provenance=record.provenance.model_dump(),
         set_id=record.set_id.model_dump(),
         created_at=now,

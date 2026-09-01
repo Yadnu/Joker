@@ -4,13 +4,11 @@ Accounts identify who wrote what.  Visibility is always global — no query
 filters by account.
 
 Tests:
-  - create account returns 201 with id and name
+  - create account returns 201 with id, name, and a one-time api_key
   - duplicate name returns 409
-  - list accounts returns all created entries
-  - get account by id returns correct record
-  - jokes filed with an account_id are readable by anyone (global reads)
-  - account_id is stored on the joke and returned in GET /jokes/{id}
-  - multiple accounts can write concurrently; all jokes are visible globally
+  - list and get-by-id do NOT expose the api_key
+  - jokes filed with an account's bearer key carry that account's attribution
+  - multiple accounts write concurrently; all jokes are visible globally
 """
 
 from __future__ import annotations
@@ -28,6 +26,9 @@ async def test_create_account_returns_id_and_name(client):
     assert "id" in body
     assert body["name"] == "Acct-Create-1"
     assert "created_at" in body
+    # api_key is returned exactly once on creation
+    assert "api_key" in body
+    assert body["api_key"].startswith("jbx_")
 
 
 @pytest.mark.asyncio
@@ -54,6 +55,23 @@ async def test_list_accounts_returns_created_entries(client):
 
 
 @pytest.mark.asyncio
+async def test_list_and_get_do_not_expose_api_key(client):
+    """api_key must not appear in list or individual-get responses."""
+    r = await client.post("/accounts", json={"name": "Acct-NoKey"})
+    assert r.status_code == 201
+    acct_id = r.json()["id"]
+
+    r_get = await client.get(f"/accounts/{acct_id}")
+    assert r_get.status_code == 200
+    assert "api_key" not in r_get.json()
+
+    r_list = await client.get("/accounts")
+    assert r_list.status_code == 200
+    for acct in r_list.json()["accounts"]:
+        assert "api_key" not in acct
+
+
+@pytest.mark.asyncio
 async def test_get_account_by_id(client):
     r = await client.post("/accounts", json={"name": "Acct-GetById"})
     assert r.status_code == 201
@@ -72,22 +90,31 @@ async def test_missing_account_returns_404(client):
 
 
 @pytest.mark.asyncio
-async def test_account_id_stored_on_joke_and_returned(client):
-    """account_id is persisted on the joke and echoed in GET /jokes/{id}."""
-    r_acct = await client.post("/accounts", json={"name": "Acct-JokeOwner"})
+async def test_attribution_comes_from_bearer_key(client):
+    """account_id on the stored joke matches the account whose key was used."""
+    # Create a dedicated account and use its key explicitly.
+    r_acct = await client.post("/accounts", json={"name": "Acct-AttributionOwner"})
     assert r_acct.status_code == 201
     acct_id = r_acct.json()["id"]
+    acct_name = r_acct.json()["name"]
+    api_key = r_acct.json()["api_key"]
 
     p = joke_payload(cabinet="AcctTest", drawer="AcctDrw", file="AcctFile", position=1)
-    p["account_id"] = acct_id
-
-    r_upsert = await client.put("/box/upsert", json=p)
+    # Override the default fixture header with this account's key.
+    r_upsert = await client.put(
+        "/box/upsert", json=p,
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
     assert r_upsert.status_code == 201
     joke_id = r_upsert.json()["joke_id"]
 
     r_joke = await client.get(f"/jokes/{joke_id}")
     assert r_joke.status_code == 200
-    assert r_joke.json()["account_id"] == acct_id
+    body = r_joke.json()
+    # account_id FK matches the bearer account
+    assert body["account_id"] == acct_id
+    # attribution.account is the bearer account's name, not spoofable from body
+    assert body["attribution"]["account"] == acct_name
 
 
 @pytest.mark.asyncio
@@ -97,6 +124,8 @@ async def test_jokes_from_different_accounts_visible_globally(client):
     r2 = await client.post("/accounts", json={"name": "Acct-Vis-2"})
     id1 = r1.json()["id"]
     id2 = r2.json()["id"]
+    key1 = r1.json()["api_key"]
+    key2 = r2.json()["api_key"]
 
     p1 = joke_payload(
         cabinet="GlobalVis", drawer="VisDrw", file="VisFile1",
@@ -106,11 +135,9 @@ async def test_jokes_from_different_accounts_visible_globally(client):
         cabinet="GlobalVis", drawer="VisDrw", file="VisFile2",
         position=2, joke_text="Account 2 joke.",
     )
-    p1["account_id"] = id1
-    p2["account_id"] = id2
 
-    ur1 = await client.put("/box/upsert", json=p1)
-    ur2 = await client.put("/box/upsert", json=p2)
+    ur1 = await client.put("/box/upsert", json=p1, headers={"Authorization": f"Bearer {key1}"})
+    ur2 = await client.put("/box/upsert", json=p2, headers={"Authorization": f"Bearer {key2}"})
     assert ur1.status_code == 201
     assert ur2.status_code == 201
 
@@ -127,17 +154,7 @@ async def test_jokes_from_different_accounts_visible_globally(client):
     assert rg1.json()["account_id"] == id1
     assert rg2.json()["account_id"] == id2
 
-    # The full tree lists both jokes without any account filter
-    tree = await client.get("/box")
-    assert tree.status_code == 200
-    all_joke_ids = [
-        j["id"]
-        for cab in tree.json()["cabinets"]
-        for drw in cab["drawers"]
-        for fil in drw["files"]
-        for j in fil.get("jokes", [])
-    ]
-    # GET /box returns joke counts, not full joke objects, so check via export
+    # Full export lists both jokes without any account filter
     export = await client.get("/export")
     assert export.status_code == 200
     export_joke_ids = [
