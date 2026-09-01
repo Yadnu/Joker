@@ -44,6 +44,7 @@ class HealthOut(BaseModel):
 class AccountOut(BaseModel):
     id: str
     name: str
+    api_key: str
     created_at: datetime
 
 

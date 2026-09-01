@@ -109,14 +109,14 @@ async def create_account(
     acct = Account(name=body.name)
     session.add(acct)
     await session.commit()
-    return AccountOut(id=acct.id, name=acct.name, created_at=acct.created_at)
+    return AccountOut(id=acct.id, name=acct.name, api_key=acct.api_key, created_at=acct.created_at)
 
 
 @router.get("/accounts", response_model=AccountListOut)
 async def list_accounts(session: AsyncSession = Depends(get_session)) -> AccountListOut:
     rows = (await session.execute(select(Account))).scalars().all()
     return AccountListOut(
-        accounts=[AccountOut(id=r.id, name=r.name, created_at=r.created_at) for r in rows]
+        accounts=[AccountOut(id=r.id, name=r.name, api_key=r.api_key, created_at=r.created_at) for r in rows]
     )
 
 
@@ -132,7 +132,7 @@ async def get_account(
             status_code=404,
             detail={"level": "account", "reason": f"Account '{account_id}' not found."},
         )
-    return AccountOut(id=acct.id, name=acct.name, created_at=acct.created_at)
+    return AccountOut(id=acct.id, name=acct.name, api_key=acct.api_key, created_at=acct.created_at)
 
 
 # ---------------------------------------------------------------------------

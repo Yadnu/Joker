@@ -46,6 +46,9 @@ class Account(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String, nullable=False)
+    # Generated at creation; never changes.  Callers supply this as a bearer
+    # token to identify themselves when writing jokes.
+    api_key: Mapped[str] = mapped_column(String, nullable=False, default=_uuid)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )
