@@ -21,13 +21,13 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from box.schema.models import Cabinet, Drawer, File, Joke, Trace
+from box.schema.models import Account, Cabinet, Drawer, File, Joke, Trace
 from box.schema.records import JokeRecord
 from shared.db import get_session
 
@@ -52,6 +52,49 @@ async def health() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Accounts
+# ---------------------------------------------------------------------------
+
+class AccountCreate(BaseModel):
+    name: str
+
+
+@router.post("/accounts", status_code=201)
+async def create_account(
+    body: AccountCreate,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Register a new account.  Names must be unique."""
+    existing = (
+        await session.execute(select(Account).where(Account.name == body.name))
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail={"reason": f"Account '{body.name}' already exists."})
+    acct = Account(name=body.name)
+    session.add(acct)
+    await session.commit()
+    return {"id": acct.id, "name": acct.name, "created_at": acct.created_at.isoformat()}
+
+
+@router.get("/accounts")
+async def list_accounts(session: AsyncSession = Depends(get_session)) -> dict:
+    rows = (await session.execute(select(Account))).scalars().all()
+    return {"accounts": [{"id": r.id, "name": r.name} for r in rows]}
+
+
+@router.get("/accounts/{account_id}")
+async def get_account(
+    account_id: str, session: AsyncSession = Depends(get_session)
+) -> dict:
+    acct = (
+        await session.execute(select(Account).where(Account.id == account_id))
+    ).scalar_one_or_none()
+    if acct is None:
+        raise HTTPException(status_code=404, detail={"level": "account", "reason": f"Account '{account_id}' not found."})
+    return {"id": acct.id, "name": acct.name, "created_at": acct.created_at.isoformat()}
+
+
+# ---------------------------------------------------------------------------
 # Upsert
 # ---------------------------------------------------------------------------
 
@@ -60,6 +103,7 @@ class UpsertRequest(BaseModel):
     drawer: str
     file: str
     joke: JokeRecord
+    account_id: str | None = None
 
 
 @router.put("/box/upsert", status_code=201)
@@ -121,6 +165,7 @@ async def upsert(
     joke = Joke(
         id=joke_id,
         file_id=fil.id,
+        account_id=body.account_id,
         prompt_responses=[t.model_dump() for t in record.prompt_responses],
         joke_text=record.joke_text,
         user_reaction=record.user_reaction,
@@ -281,6 +326,185 @@ async def get_joke_trace(
 
 
 # ---------------------------------------------------------------------------
+# Path read
+# ---------------------------------------------------------------------------
+
+@router.get("/box/{cabinet}/{drawer}/{file}")
+async def read_by_path(
+    cabinet: str,
+    drawer: str,
+    file: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return all jokes at a specific cabinet/drawer/file path."""
+    cab = (
+        await session.execute(select(Cabinet).where(Cabinet.label == cabinet))
+    ).scalar_one_or_none()
+    if cab is None:
+        raise _level_error("cabinet", f"Cabinet '{cabinet}' not found.")
+    drw = (
+        await session.execute(
+            select(Drawer).where(Drawer.cabinet_id == cab.id, Drawer.label == drawer)
+        )
+    ).scalar_one_or_none()
+    if drw is None:
+        raise _level_error("drawer", f"Drawer '{drawer}' not found.")
+    fil = (
+        await session.execute(
+            select(File).where(File.drawer_id == drw.id, File.label == file)
+        )
+    ).scalar_one_or_none()
+    if fil is None:
+        raise _level_error("file", f"File '{file}' not found.")
+    jokes = (
+        await session.execute(select(Joke).where(Joke.file_id == fil.id))
+    ).scalars().all()
+    return {
+        "cabinet": {"id": cab.id, "label": cab.label},
+        "drawer": {"id": drw.id, "label": drw.label},
+        "file": {"id": fil.id, "label": fil.label},
+        "jokes": [_joke_to_dict(j) for j in jokes],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Funniest in genre
+# ---------------------------------------------------------------------------
+
+@router.get("/genres/{genre}/funniest")
+async def funniest_in_genre(
+    genre: str,
+    n: int = Query(default=5, ge=1, le=100),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return up to n highest-scoring jokes in the given genre (category)."""
+    jokes = (
+        await session.execute(
+            select(Joke)
+            .where(Joke.category == genre)
+            .order_by(Joke.score.desc())
+            .limit(n)
+        )
+    ).scalars().all()
+    return {"genre": genre, "jokes": [_joke_to_dict(j) for j in jokes]}
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+@router.get("/export")
+async def export(session: AsyncSession = Depends(get_session)) -> dict:
+    """Full library export: every cabinet, drawer, file, and joke as JSON."""
+    cabs = (await session.execute(select(Cabinet))).scalars().all()
+    result = []
+    for cab in cabs:
+        drawers = []
+        for drw in (
+            await session.execute(select(Drawer).where(Drawer.cabinet_id == cab.id))
+        ).scalars().all():
+            files = []
+            for fil in (
+                await session.execute(select(File).where(File.drawer_id == drw.id))
+            ).scalars().all():
+                jokes = (
+                    await session.execute(select(Joke).where(Joke.file_id == fil.id))
+                ).scalars().all()
+                files.append({
+                    "id": fil.id,
+                    "label": fil.label,
+                    "jokes": [_joke_to_dict(j) for j in jokes],
+                })
+            drawers.append({"id": drw.id, "label": drw.label, "files": files})
+        result.append({"id": cab.id, "label": cab.label, "drawers": drawers})
+    return {"cabinets": result}
+
+
+# ---------------------------------------------------------------------------
+# Scoped counts
+# ---------------------------------------------------------------------------
+
+@router.get("/cabinets/{cabinet_id}/counts")
+async def cabinet_counts(
+    cabinet_id: str, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Count of drawers, files, and jokes under a cabinet."""
+    cab = (
+        await session.execute(select(Cabinet).where(Cabinet.id == cabinet_id))
+    ).scalar_one_or_none()
+    if cab is None:
+        raise _level_error("cabinet", f"Cabinet '{cabinet_id}' not found.")
+    n_drw = (
+        await session.execute(
+            select(func.count()).select_from(Drawer).where(Drawer.cabinet_id == cabinet_id)
+        )
+    ).scalar()
+    drw_ids = (
+        await session.execute(select(Drawer.id).where(Drawer.cabinet_id == cabinet_id))
+    ).scalars().all()
+    n_fil = (
+        await session.execute(
+            select(func.count()).select_from(File).where(File.drawer_id.in_(drw_ids))
+        )
+    ).scalar()
+    fil_ids = (
+        await session.execute(
+            select(File.id).where(File.drawer_id.in_(drw_ids))
+        )
+    ).scalars().all()
+    n_jokes = (
+        await session.execute(
+            select(func.count()).select_from(Joke).where(Joke.file_id.in_(fil_ids))
+        )
+    ).scalar()
+    return {"cabinet_id": cabinet_id, "drawers": n_drw, "files": n_fil, "jokes": n_jokes}
+
+
+@router.get("/drawers/{drawer_id}/counts")
+async def drawer_counts(
+    drawer_id: str, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Count of files and jokes under a drawer."""
+    drw = (
+        await session.execute(select(Drawer).where(Drawer.id == drawer_id))
+    ).scalar_one_or_none()
+    if drw is None:
+        raise _level_error("drawer", f"Drawer '{drawer_id}' not found.")
+    n_fil = (
+        await session.execute(
+            select(func.count()).select_from(File).where(File.drawer_id == drawer_id)
+        )
+    ).scalar()
+    fil_ids = (
+        await session.execute(select(File.id).where(File.drawer_id == drawer_id))
+    ).scalars().all()
+    n_jokes = (
+        await session.execute(
+            select(func.count()).select_from(Joke).where(Joke.file_id.in_(fil_ids))
+        )
+    ).scalar()
+    return {"drawer_id": drawer_id, "files": n_fil, "jokes": n_jokes}
+
+
+@router.get("/files/{file_id}/counts")
+async def file_counts(
+    file_id: str, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Count of jokes in a file."""
+    fil = (
+        await session.execute(select(File).where(File.id == file_id))
+    ).scalar_one_or_none()
+    if fil is None:
+        raise _level_error("file", f"File '{file_id}' not found.")
+    n_jokes = (
+        await session.execute(
+            select(func.count()).select_from(Joke).where(Joke.file_id == file_id)
+        )
+    ).scalar()
+    return {"file_id": file_id, "jokes": n_jokes}
+
+
+# ---------------------------------------------------------------------------
 # Compliance
 # ---------------------------------------------------------------------------
 
@@ -378,6 +602,7 @@ def _joke_to_dict(joke: Joke) -> dict:
     return {
         "id": joke.id,
         "file_id": joke.file_id,
+        "account_id": joke.account_id,
         "prompt_responses": joke.prompt_responses,
         "joke_text": joke.joke_text,
         "user_reaction": joke.user_reaction,

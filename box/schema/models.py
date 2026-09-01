@@ -39,6 +39,23 @@ class Base(DeclarativeBase):
     pass
 
 
+class Account(Base):
+    """One row per registered account.  Attribution references this by id."""
+
+    __tablename__ = "accounts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+
+    __table_args__ = (UniqueConstraint("name", name="uq_account_name"),)
+
+    jokes: Mapped[list["Joke"]] = relationship("Joke", back_populates="account_obj")
+
+
+
 class Cabinet(Base):
     __tablename__ = "cabinets"
 
@@ -111,6 +128,10 @@ class Joke(Base):
     file_id: Mapped[str] = mapped_column(
         String, ForeignKey("files.id", ondelete="CASCADE"), nullable=False
     )
+    # Nullable FK — jokes filed before accounts existed remain valid.
+    account_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
+    )
 
     # Fixed field names — do not rename.
     prompt_responses: Mapped[dict] = mapped_column(JSONB, nullable=False)
@@ -131,6 +152,7 @@ class Joke(Base):
     )
 
     file: Mapped[File] = relationship("File", back_populates="jokes")
+    account_obj: Mapped["Account | None"] = relationship("Account", back_populates="jokes")
 
 
 class Trace(Base):

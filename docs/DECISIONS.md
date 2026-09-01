@@ -89,3 +89,51 @@
 **Alternatives:** Only require justification for new labels; make it optional in both cases.
 **Reason:** Silent label reuse is the primary mechanism for taxonomy drift: the model repeatedly picks the closest-sounding label without checking whether it is genuinely correct. Requiring a reuse justification forces the model to articulate the fit, which the trace makes auditable. The cost of an extra sentence per classification is negligible.
 **Cost:** Slightly more expensive classification calls (more output tokens); model may produce boilerplate justifications that look compliant without being meaningful.
+
+---
+
+### 2026-09-01 Multi-user: accounts table with nullable FK on jokes
+
+**Decision:** Added an `accounts` table (`id`, `name`, `created_at`) and a nullable `account_id` FK column on `jokes`. `PUT /box/upsert` accepts an optional `account_id`. All read endpoints remain global - no WHERE clause filters by account.
+
+**Alternatives:** Store account only as a string inside `attribution` JSONB (lighter, no FK); or add a full auth layer with JWT tokens and row-level security.
+
+**Reason:** A proper DB-level FK enables joins and provable non-filtering. A string-only approach would make it hard to verify that reads are truly global. Full auth is out of scope for Milestone 1.
+
+**Cost:** Nullable FK means jokes filed without an `account_id` are valid; the column must stay nullable forever for backward compatibility unless a backfill migration is written.
+
+---
+
+### 2026-09-01 Funniest-in-genre as a Box HTTP endpoint
+
+**Decision:** Added `GET /genres/{genre}/funniest?n=5` to `box/router.py`, selecting jokes by `category` ordered by `score DESC LIMIT n`.
+
+**Alternatives:** Keep it only in `joker/tools.py` (Python function); or expose it as `GET /jokes?category={genre}&sort=score`.
+
+**Reason:** The requirement explicitly names funniest-in-genre as a Box API surface. A dedicated route is easier to document and test via HTTP than a generic filtered query.
+
+**Cost:** Duplicates the logic in `joker/tools.py`; if the scoring model changes the two implementations must be kept in sync.
+
+---
+
+### 2026-09-01 Export and path-read endpoints
+
+**Decision:** Added `GET /export` (full tree with all jokes) and `GET /box/{cabinet}/{drawer}/{file}` (jokes at a specific path).
+
+**Alternatives:** Use `GET /box` (which returns joke counts, not joke bodies) for export; require callers to walk the tree manually.
+
+**Reason:** The spec calls for both an export endpoint and a path-based read. Embedding jokes directly in the export response avoids N+1 client round-trips.
+
+**Cost:** `GET /export` is an O(N) full-scan that will be slow for large libraries; should be paginated or streamed before production use.
+
+---
+
+### 2026-09-01 Scoped counts via sub-resource endpoints
+
+**Decision:** Added `GET /cabinets/{id}/counts`, `GET /drawers/{id}/counts`, and `GET /files/{id}/counts` returning child-level tallies.
+
+**Alternatives:** Add `?scope=cabinet&id=X` query params to the existing `GET /counts` endpoint.
+
+**Reason:** Sub-resource URLs are idiomatic REST and avoid a combinatorial query-param surface. Each endpoint does a small targeted query.
+
+**Cost:** Three extra route declarations; global `/counts` and scoped endpoints are not unified, so a refactor is needed if the counting logic grows complex.
