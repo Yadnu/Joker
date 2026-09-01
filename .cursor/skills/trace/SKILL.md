@@ -1,24 +1,56 @@
 ---
 name: trace
 description: Use when adding or modifying any component that calls a model, makes a decision, or produces an artifact.
-version: "1.0.0"
+version: "1.1.0"
 ---
 
 # Trace
 
 Every model call, decision, and artifact must be recorded via `shared/trace.py`.
-A model call that is not recorded via this module does not exist for grading
-purposes.
+A call that is not recorded via this module does not exist for grading purposes.
 
 ## Signature
 
 ```python
-def record_step(*, kind: str, artifact: object, rationale: str, **extra) -> None:
-    ...
+async def record_step(
+    *,
+    artifact_id: str,
+    artifact_type: str,
+    kind: str,
+    actor: str,
+    model: str | None,
+    prompt_ref: str | None,
+    inputs: dict,
+    output: dict,
+    rationale: str,
+    latency_ms: int,
+    cost: float | None,
+    session: AsyncSession,
+) -> None: ...
 ```
 
 All arguments are keyword-only. `rationale` is required and has **no default**.
-Omitting it is a type error.
+Omitting it is a `TypeError`. An empty string raises `ValueError`.
+
+The `session` argument is the active `AsyncSession` for the current request.
+`record_step` calls `session.flush()` but does not commit; the caller owns
+the transaction boundary.
+
+## Field descriptions
+
+| Argument | Notes |
+|----------|-------|
+| `artifact_id` | Identifier of the primary artifact (joke_id, set_id, category label, …) |
+| `artifact_type` | Kind of artifact: `"joke"`, `"set"`, `"category"`, `"score"`, … |
+| `kind` | One of the eleven valid step kinds (see below) |
+| `actor` | Component path: `"librarian.classify"`, `"joker.generate"`, … |
+| `model` | Model name if a model was called; `None` otherwise |
+| `prompt_ref` | Stable reference to the prompt template, if any |
+| `inputs` | Serialisable dict of all inputs to this step |
+| `output` | Serialisable dict of all outputs from this step |
+| `rationale` | **Required.** One or more sentences explaining the decision |
+| `latency_ms` | Wall-clock time for this step in milliseconds |
+| `cost` | Estimated USD cost of any model call; `None` if no model was called |
 
 ## Valid step kinds
 
@@ -38,64 +70,60 @@ Only the following values are accepted for `kind`:
 | `set_construction` | A new set is assembled |
 | `set_adaptation` | An existing set is modified in response to live feedback |
 
-Any string not in this list is invalid.
+Any string not in this list raises `ValueError`.
 
 ## Worked example — single joke, generation through filing
 
 ```python
 from shared.trace import record_step
+import time
 
-# 1. Model generates the joke
-record_step(
+t0 = time.monotonic()
+# ... call model ...
+ms = int((time.monotonic() - t0) * 1000)
+
+await record_step(
+    artifact_id="joke_a1b2c3",
+    artifact_type="joke",
     kind="generation",
-    artifact={
-        "joke_text": "I told the TSA agent I packed my own bags. He said, 'That's great—now unpack them.'"
-    },
-    rationale="Prompt requested a short observational joke about airport security; this candidate had the tightest punchline of three.",
+    actor="joker.generate",
     model="gpt-4o",
-    prompt="Tell me a short joke about airport security.",
-    candidates_evaluated=3,
+    prompt_ref="prompts/generate_good_v1",
+    inputs={"topic": "airport security", "style": "one-liner", "intended_quality": "good"},
+    output={"joke_text": "I told the TSA agent I packed my own bags. He said, 'That's great—now unpack them.'"},
+    rationale="Highest-scoring of three candidates; punchline timing suited one-liner delivery.",
+    latency_ms=ms,
+    cost=0.0012,
+    session=session,
 )
 
-# 2. Librarian classifies the joke
-record_step(
+await record_step(
+    artifact_id="joke_a1b2c3",
+    artifact_type="joke",
     kind="classification",
-    artifact={"category": "Observational"},
-    rationale="Joke draws humour from a recognisable everyday inconvenience with no target group; fits Observational over Satire or Topical.",
+    actor="librarian.classify",
+    model="gpt-4o-mini",
+    prompt_ref="prompts/classify_v1",
+    inputs={"joke_text": "...", "taxonomy_snapshot_version": "2026-08-31"},
+    output={"category": "Observational", "is_new": False, "path": ["Travel", "Airports", "Security"]},
+    rationale="Joke draws humour from a recognisable everyday inconvenience with no target group; existing label 'Observational' is the closest match.",
+    latency_ms=210,
+    cost=0.0001,
+    session=session,
 )
 
-# 3. Librarian suggests a filing path
-record_step(
-    kind="suggestion",
-    artifact={"path": ["Travel", "Airports", "Security"]},
-    rationale="Existing cabinet 'Travel' > drawer 'Airports' > file 'Security' is the closest compliant match; no new category needed.",
-)
-
-# 4. Joke is filed into the Box
-record_step(
+await record_step(
+    artifact_id="joke_a1b2c3",
+    artifact_type="joke",
     kind="filing",
-    artifact={"joke_id": "joke_a1b2c3", "file_id": "file_security_01"},
+    actor="joker.file",
+    model=None,
+    prompt_ref=None,
+    inputs={"file_id": "file_security_01", "path": ["Travel", "Airports", "Security"]},
+    output={"joke_id": "joke_a1b2c3", "success": True},
     rationale="Path supplied by Librarian; Box upsert succeeded in single transaction.",
-)
-
-# 5. Joke delivered over voice
-record_step(
-    kind="delivery",
-    artifact={"joke_id": "joke_a1b2c3", "channel": "voice"},
-    rationale="Next joke in set_travel_2026_08_31 at position 3; prior joke scored 7, continuing set.",
-)
-
-# 6. User reaction captured
-record_step(
-    kind="reaction_capture",
-    artifact={"user_reaction": "Ha! That's exactly what happened to me last Tuesday."},
-    rationale="Captured verbatim immediately after punchline silence window (1.2 s).",
-)
-
-# 7. Score assigned
-record_step(
-    kind="scoring",
-    artifact={"score": 8},
-    rationale="Positive verbal reaction plus laughter detected; mapped to 8/10 per scoring rubric.",
+    latency_ms=45,
+    cost=None,
+    session=session,
 )
 ```
