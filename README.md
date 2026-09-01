@@ -104,6 +104,7 @@ Accounts identify who filed a joke (`account_id` on the upsert body).
 | GET | `/cabinets` | List all cabinets |
 | GET | `/cabinets/{id}` | Cabinet with its drawers |
 | GET | `/cabinets/{id}/counts` | Drawer / file / joke counts under a cabinet |
+| GET | `/drawers` | List all drawers (flat, across all cabinets; includes `cabinet_id`) |
 | GET | `/drawers/{id}` | Drawer with its files |
 | GET | `/drawers/{id}/counts` | File / joke counts under a drawer |
 | GET | `/files/{id}` | File with its jokes |
@@ -118,6 +119,45 @@ Accounts identify who filed a joke (`account_id` on the upsert body).
 | GET | `/genres/{genre}/funniest` | Top-n highest-scoring jokes in a genre (`?n=5`) |
 | GET | `/counts` | Global counts: cabinets, drawers, files, jokes |
 | GET | `/compliance` | Live hierarchy compliance check (> 1 child at every level) |
+
+---
+
+## Joke record fields
+
+All ten fields are required on `PUT /box/upsert`.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `prompt_responses` | `[{role, content}]` | Turn-by-turn exchange; supports multi-turn knock-knock structure |
+| `joke_text` | `str` | Full joke as delivered |
+| `user_reaction` | `str` | What the listener said after the punchline; stored separately from the joke |
+| `score` | `int` 0–10 | Landing score |
+| `category` | `str` | Genre label; must match the file label; never `"General"` |
+| `metadata` | `{topic, style, length, sensitivity_flags}` | `sensitivity_flags` uses `HumorStyle` vocabulary |
+| `user_context` | `UserContext` object | Per-session listener snapshot (see below) |
+| `attribution` | `{joker, account}` | Which Joker instance and account filed this |
+| `provenance` | `{source, model, prompt, selection_rationale}` | `source` is `"generated"` or `"curated"` |
+| `set_id` | `{set, position}` | Set name and position within it |
+
+### UserContext
+
+All fields optional — a session with only `energy` populated is valid.
+
+| Field | Type | Values |
+|-------|------|--------|
+| `age_band` | enum | `under_25` · `25_40` · `40_60` · `over_60` |
+| `region` | str | Coarse locale, e.g. `"US West"`, `"UK"`. **Not a city.** |
+| `occupation_field` | enum | `tech` · `healthcare` · `education` · `trades` · `finance` · `student` · `retired` · `other` |
+| `humor_preferences` | list[HumorStyle] | Styles the listener enjoys |
+| `humor_avoid` | list[HumorStyle] | **Hard constraint** — never a soft preference |
+| `energy` | enum | `warm` · `dry` · `rowdy` · `reserved` |
+| `first_time` | bool | Whether this listener has heard this Joker before |
+| `session_notes` | str | One short free-text line |
+
+**HumorStyle vocabulary** (shared by `sensitivity_flags`, `humor_preferences`, `humor_avoid`):
+`wordplay` · `observational` · `absurdist` · `deadpan` · `dark` · `physical` · `self_deprecating` · `topical`
+
+**Never stored:** name, date of birth, exact age, email, employer, city, or any other identifying value.
 
 ---
 
