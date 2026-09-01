@@ -13,6 +13,7 @@ import time
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.models import SCORE_MODEL, build_messages, completion_kwargs
 from shared.trace import record_step
 
 _client = AsyncOpenAI()
@@ -52,20 +53,17 @@ async def score(
         "and a key 'rationale' (one sentence)."
     )
 
+    system = (
+        "You are a neutral comedy evaluator. "
+        "Score the joke strictly against the provided rubric anchors. "
+        "Interpolate linearly between anchors."
+    )
     response = await _client.chat.completions.create(
-        model="gpt-4o-mini",
-        response_format={"type": "json_object"},
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a neutral comedy evaluator. "
-                    "Score the joke strictly against the provided rubric anchors. "
-                    "Interpolate linearly between anchors."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
+        **completion_kwargs(
+            SCORE_MODEL,
+            response_format={"type": "json_object"},
+            messages=build_messages(system, prompt, SCORE_MODEL),
+        )
     )
 
     latency_ms = int((time.monotonic() - t0) * 1000)
@@ -82,7 +80,7 @@ async def score(
         artifact_type="joke",
         kind="scoring",
         actor="librarian.score",
-        model="gpt-4o-mini",
+        model=SCORE_MODEL,
         prompt_ref="librarian/score_v1",
         inputs={
             "joke_text": joke_text,

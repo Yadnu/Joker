@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
+from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from box.schema.models import Base
+
+# Load .env so migrations work whether run from an IDE or the shell.
+load_dotenv(Path(__file__).parents[1] / ".env", override=True)
 
 config = context.config
 if config.config_file_name is not None:
@@ -17,7 +23,20 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-DATABASE_URL = os.environ.get("DATABASE_URL", config.get_main_option("sqlalchemy.url", ""))
+
+def _normalize_db_url(url: str) -> str:
+    """Convert a Neon/psycopg connection string to asyncpg-compatible form."""
+    url = url.strip().strip('"').strip("'")
+    url = re.sub(r"^postgres(ql)?://", "postgresql+asyncpg://", url)
+    url = re.sub(r"sslmode=require", "ssl=require", url)
+    url = re.sub(r"[&?]channel_binding=[^&]*", "", url)
+    url = re.sub(r"[?&]$", "", url)
+    return url
+
+
+DATABASE_URL = _normalize_db_url(
+    os.environ.get("DATABASE_URL", config.get_main_option("sqlalchemy.url", ""))
+)
 
 
 def run_migrations_offline() -> None:

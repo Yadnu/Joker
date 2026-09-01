@@ -20,6 +20,15 @@
 
 ---
 
+### 2026-09-01 Model registry and o3 upgrade
+
+**Decision:** Centralise all model names in `shared/models.py`. Default high-stakes roles (`CLASSIFY_MODEL`, `GENERATE_GOOD`, `SETBUILD_MODEL`) to `o3`; default fast/cheap roles (`SUGGEST_MODEL`, `SCORE_MODEL`, `METADATA_MODEL`) to `gpt-4o-mini`; keep `GENERATE_BAD` on `gpt-4o-mini` intentionally. Every role is overridable via environment variable with no code change.
+**Alternatives:** Hard-code model names per file (previous state); use a config file (YAML/TOML) instead of env vars.
+**Reason:** Taxonomy classification and joke generation are the highest-stakes calls — a bad classification is permanent, and comedy quality is the product's core value. `o3`'s chain-of-thought reasoning produces measurably better taxonomy decisions and sharper jokes than `gpt-4o`. Env-var overrides let cost be dialled back instantly without a deploy.
+**Cost:** `o3` does not accept a `system` role or `response_format=json_object`, and does not support `n > 1`. `shared/models.py` provides `build_messages` and `completion_kwargs` helpers to abstract these differences; every caller must use them. `o3` is also ~8× more expensive than `gpt-4o` per token — the fast/cheap roles deliberately stay on `gpt-4o-mini` to keep total cost manageable.
+
+---
+
 ### 2026-08-31 trace.py signature: explicit fields over **kwargs sketch
 
 **Decision:** Implement `record_step` with explicit keyword-only arguments (`artifact_id`, `artifact_type`, `kind`, `actor`, `model`, `prompt_ref`, `inputs`, `output`, `rationale`, `latency_ms`, `cost`, `session`) rather than the `**kwargs` sketch in the original trace skill.

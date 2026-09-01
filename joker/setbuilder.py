@@ -21,6 +21,7 @@ from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from librarian.interface import Angle
+from shared.models import SETBUILD_MODEL, build_messages, completion_kwargs
 from shared.trace import record_step
 
 _client = AsyncOpenAI()
@@ -84,25 +85,22 @@ async def build_set(
 
     prompt = _build_prompt(angles, listener_context)
 
+    system = (
+        "You are a stand-up comedy set designer. "
+        "Build an ordered set with slots: opener, 2-3 bits, callback, closer. "
+        "Return JSON with keys: "
+        "'slots' (list of {name, joke_text, transition_to_next}), "
+        "'recovery' ({action, line, rationale}). "
+        "transition_to_next must explain the DEPENDENCY between this slot and the next, "
+        "not just describe the next joke. "
+        "Valid recovery actions: skip_to_callback, self_deprecate, pivot_topic, end_set."
+    )
     response = await _client.chat.completions.create(
-        model="gpt-4o",
-        response_format={"type": "json_object"},
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a stand-up comedy set designer. "
-                    "Build an ordered set with slots: opener, 2-3 bits, callback, closer. "
-                    "Return JSON with keys: "
-                    "'slots' (list of {name, joke_text, transition_to_next}), "
-                    "'recovery' ({action, line, rationale}). "
-                    "transition_to_next must explain the DEPENDENCY between this slot and the next, "
-                    "not just describe the next joke. "
-                    "Valid recovery actions: skip_to_callback, self_deprecate, pivot_topic, end_set."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
+        **completion_kwargs(
+            SETBUILD_MODEL,
+            response_format={"type": "json_object"},
+            messages=build_messages(system, prompt, SETBUILD_MODEL),
+        )
     )
 
     latency_ms = int((time.monotonic() - t0) * 1000)
@@ -135,7 +133,7 @@ async def build_set(
         artifact_type="set",
         kind="set_construction",
         actor="joker.setbuilder",
-        model="gpt-4o",
+        model=SETBUILD_MODEL,
         prompt_ref="joker/setbuilder_v1",
         inputs={
             "angles": [a.model_dump() for a in angles],

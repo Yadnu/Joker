@@ -12,20 +12,44 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from dotenv import load_dotenv
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-# Set DATABASE_URL before any project imports so shared/db.py doesn't raise.
-os.environ.setdefault(
-    "DATABASE_URL",
-    os.environ.get(
-        "TEST_DATABASE_URL",
-        "postgresql+asyncpg://jokebox:jokebox@localhost:5432/jokebox_test",
-    ),
+# Load .env from the project root so credentials are available
+# whether pytest is run from the shell or from an IDE.
+load_dotenv(Path(__file__).parents[2] / ".env", override=True)
+
+
+def _normalize_db_url(url: str) -> str:
+    """Convert a Neon/psycopg connection string to asyncpg-compatible form."""
+    url = url.strip().strip('"').strip("'")
+    # Ensure asyncpg dialect
+    url = re.sub(r"^postgres(ql)?://", "postgresql+asyncpg://", url)
+    # asyncpg uses ssl=require, not sslmode=require
+    url = re.sub(r"sslmode=require", "ssl=require", url)
+    # asyncpg does not understand channel_binding
+    url = re.sub(r"[&?]channel_binding=[^&]*", "", url)
+    # Tidy trailing punctuation
+    url = re.sub(r"[?&]$", "", url)
+    return url
+
+
+# Prefer TEST_DATABASE_URL; fall back to DATABASE_URL; last resort local PG.
+_test_url = _normalize_db_url(
+    os.environ.get("TEST_DATABASE_URL")
+    or os.environ.get("DATABASE_URL")
+    or "postgresql+asyncpg://jokebox:jokebox@localhost:5432/jokebox_test"
 )
+
+# Set DATABASE_URL before any project imports so shared/db.py doesn't raise.
+os.environ["DATABASE_URL"] = _test_url
+os.environ["TEST_DATABASE_URL"] = _test_url
 
 from box.main import app  # noqa: E402
 from box.schema.models import Base  # noqa: E402
@@ -35,10 +59,7 @@ import shared.db as _db_module  # noqa: E402
 # Test database URL
 # ---------------------------------------------------------------------------
 
-TEST_DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL",
-    "postgresql+asyncpg://jokebox:jokebox@localhost:5432/jokebox_test",
-)
+TEST_DATABASE_URL = _test_url
 
 # ---------------------------------------------------------------------------
 # Session-scoped engine: create schema once, drop after the whole session

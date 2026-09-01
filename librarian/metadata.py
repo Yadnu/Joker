@@ -15,6 +15,7 @@ from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from box.schema.records import JokeMetadata
+from shared.models import METADATA_MODEL, build_messages, completion_kwargs
 from shared.trace import record_step
 
 _client = AsyncOpenAI()
@@ -66,15 +67,15 @@ async def extract_metadata(
     )
 
     response = await _client.chat.completions.create(
-        model="gpt-4o-mini",
-        response_format={"type": "json_object"},
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a comedy metadata extractor. Return only JSON.",
-            },
-            {"role": "user", "content": prompt},
-        ],
+        **completion_kwargs(
+            METADATA_MODEL,
+            response_format={"type": "json_object"},
+            messages=build_messages(
+                "You are a comedy metadata extractor. Return only JSON.",
+                prompt,
+                METADATA_MODEL,
+            ),
+        )
     )
 
     latency_ms = int((time.monotonic() - t0) * 1000)
@@ -103,7 +104,7 @@ async def extract_metadata(
         artifact_type="joke",
         kind="generation",
         actor="librarian.metadata",
-        model="gpt-4o-mini",
+        model=METADATA_MODEL,
         prompt_ref="librarian/metadata_v1",
         inputs={"joke_text": joke_text},
         output=metadata.model_dump(),

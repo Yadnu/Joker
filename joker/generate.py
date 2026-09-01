@@ -21,12 +21,13 @@ from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from box.schema.records import Provenance
+from shared.models import GENERATE_GOOD, GENERATE_BAD, build_messages, completion_kwargs
 from shared.trace import record_step
 
 _client = AsyncOpenAI()
 
-GOOD_MODEL = "gpt-4o"
-BAD_MODEL = "gpt-4o-mini"
+GOOD_MODEL = GENERATE_GOOD
+BAD_MODEL  = GENERATE_BAD
 _CANDIDATE_COUNT = 3
 
 
@@ -53,21 +54,32 @@ async def generate(
     system_prompt = _system_prompt(intended_quality)
     user_prompt = _user_prompt(topic, style, user_context, intended_quality)
 
-    response = await _client.chat.completions.create(
-        model=model,
-        n=_CANDIDATE_COUNT,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    )
+    # o3 doesn't support n > 1; generate candidates sequentially for reasoning models.
+    from shared.models import is_reasoning_model
+    if is_reasoning_model(model):
+        raw_responses = []
+        for _ in range(_CANDIDATE_COUNT):
+            r = await _client.chat.completions.create(
+                **completion_kwargs(
+                    model,
+                    messages=build_messages(system_prompt, user_prompt, model),
+                )
+            )
+            raw_responses.append(r.choices[0].message.content or "")
+        # Synthesise a single response-like object for cost estimation
+        response = r  # last response; usage tracked per-call below
+        candidates = raw_responses
+    else:
+        response = await _client.chat.completions.create(
+            **completion_kwargs(
+                model,
+                n=_CANDIDATE_COUNT,
+                messages=build_messages(system_prompt, user_prompt, model),
+            )
+        )
+        candidates = [choice.message.content or "" for choice in response.choices]
 
     latency_ms = int((time.monotonic() - t0) * 1000)
-
-    candidates = [
-        choice.message.content or "" for choice in response.choices
-    ]
-
     joke_text, selection_rationale = _select(candidates, intended_quality)
 
     provenance = Provenance(

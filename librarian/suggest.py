@@ -22,6 +22,7 @@ from librarian.interface import (
     SuggestionRequest,
     SuggestionResponse,
 )
+from shared.models import SUGGEST_MODEL, build_messages, completion_kwargs
 from shared.trace import record_step
 
 _client = AsyncOpenAI()
@@ -74,23 +75,20 @@ async def suggest(
         context_keywords=context_keywords,
     )
 
+    system = (
+        "You are the Librarian for an AI comedian. "
+        "Return a JSON object with key 'angles', a list of objects each "
+        "with keys: genre, topic, rationale, freshness_score (0.0-1.0). "
+        "Thin genres should have higher freshness_score. "
+        "Return at least 3 angles."
+    )
     model_t0 = time.monotonic()
     response = await _client.chat.completions.create(
-        model="gpt-4o-mini",
-        response_format={"type": "json_object"},
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are the Librarian for an AI comedian. "
-                    "Return a JSON object with key 'angles', a list of objects each "
-                    "with keys: genre, topic, rationale, freshness_score (0.0-1.0). "
-                    "Thin genres should have higher freshness_score. "
-                    "Return at least 3 angles."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
+        **completion_kwargs(
+            SUGGEST_MODEL,
+            response_format={"type": "json_object"},
+            messages=build_messages(system, prompt, SUGGEST_MODEL),
+        )
     )
     model_ms = int((time.monotonic() - model_t0) * 1000)
 
@@ -120,7 +118,7 @@ async def suggest(
         artifact_type="suggestion",
         kind="suggestion",
         actor="librarian.suggest",
-        model="gpt-4o-mini",
+        model=SUGGEST_MODEL,
         prompt_ref="librarian/suggest_v1",
         inputs={
             "user_context": request.user_context,

@@ -7,11 +7,23 @@ Example: postgresql+asyncpg://user:pass@localhost/jokebox
 from __future__ import annotations
 
 import os
+import re
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+
+def _normalize_db_url(url: str) -> str:
+    """Convert a Neon/psycopg connection string to asyncpg-compatible form."""
+    url = url.strip().strip('"').strip("'")
+    url = re.sub(r"^postgres(ql)?://", "postgresql+asyncpg://", url)
+    url = re.sub(r"sslmode=require", "ssl=require", url)
+    url = re.sub(r"[&?]channel_binding=[^&]*", "", url)
+    url = re.sub(r"[?&]$", "", url)
+    return url
+
+
 def _make_engine():
-    url = os.environ.get("DATABASE_URL", "")
+    url = _normalize_db_url(os.environ.get("DATABASE_URL", ""))
     if not url:
         raise RuntimeError(
             "DATABASE_URL environment variable is not set. "

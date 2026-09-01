@@ -43,7 +43,11 @@ async def test_concurrent_upsert_same_path(test_session_factory):
     from box.main import app
     from shared import db as db_module
 
-    db_module.SessionFactory = test_session_factory
+    # The test_session_factory is bound to the pytest session event loop.
+    # Uvicorn runs on its own loop, so we must let it create its own factory
+    # from DATABASE_URL (already set to the test URL by conftest).
+    original_factory = db_module.SessionFactory
+    db_module.SessionFactory = None  # type: ignore[assignment]
 
     # Start a real uvicorn server on a random port so the threads can use
     # plain httpx (not ASGI transport, which is not thread-safe).
@@ -86,6 +90,7 @@ async def test_concurrent_upsert_same_path(test_session_factory):
 
     server.should_exit = True
     server_thread.join(timeout=5)
+    db_module.SessionFactory = original_factory  # type: ignore[assignment]
 
     # Neither request errored
     assert results[0] is not None, "Thread 0 never completed"

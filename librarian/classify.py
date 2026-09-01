@@ -24,6 +24,7 @@ from librarian.interface import (
     ClassificationRequest,
     ClassificationResponse,
 )
+from shared.models import CLASSIFY_MODEL, build_messages, completion_kwargs
 from shared.trace import record_step
 
 _client = AsyncOpenAI()
@@ -44,26 +45,23 @@ async def classify(
     taxonomy = await _fetch_taxonomy(session)
     prompt = _build_prompt(request, taxonomy)
 
+    system = (
+        "You are the Librarian for an AI comedian. "
+        "Given a joke and the current taxonomy, decide whether to "
+        "assign an existing category or create a new one. "
+        "Return JSON with keys: category (str), is_new (bool), "
+        "justification (str, non-empty), "
+        "path ([cabinet_label, drawer_label, file_label]). "
+        "Never use 'General' as a category. "
+        "justification is REQUIRED whether is_new is true or false."
+    )
     model_t0 = time.monotonic()
     response = await _client.chat.completions.create(
-        model="gpt-4o",
-        response_format={"type": "json_object"},
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are the Librarian for an AI comedian. "
-                    "Given a joke and the current taxonomy, decide whether to "
-                    "assign an existing category or create a new one. "
-                    "Return JSON with keys: category (str), is_new (bool), "
-                    "justification (str, non-empty), "
-                    "path ([cabinet_label, drawer_label, file_label]). "
-                    "Never use 'General' as a category. "
-                    "justification is REQUIRED whether is_new is true or false."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
+        **completion_kwargs(
+            CLASSIFY_MODEL,
+            response_format={"type": "json_object"},
+            messages=build_messages(system, prompt, CLASSIFY_MODEL),
+        )
     )
     model_ms = int((time.monotonic() - model_t0) * 1000)
 
@@ -100,7 +98,7 @@ async def classify(
         artifact_type="category",
         kind="classification",
         actor="librarian.classify",
-        model="gpt-4o",
+        model=CLASSIFY_MODEL,
         prompt_ref="librarian/classify_v1",
         inputs={
             "joke_text": request.joke_text,
@@ -237,5 +235,9 @@ def _estimate_cost(response) -> float | None:  # type: ignore[no-untyped-def]
     usage = getattr(response, "usage", None)
     if usage is None:
         return None
+    from shared.models import is_reasoning_model
+    if is_reasoning_model(CLASSIFY_MODEL):
+        # o3 pricing (approximate): $10/1M input, $40/1M output
+        return (usage.prompt_tokens * 10 + usage.completion_tokens * 40) / 1_000_000
     # gpt-4o pricing (approximate): $5/1M input, $15/1M output
     return (usage.prompt_tokens * 5 + usage.completion_tokens * 15) / 1_000_000

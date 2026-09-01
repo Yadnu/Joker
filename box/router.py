@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from box.schema.models import Cabinet, Drawer, File, Joke, Trace
@@ -76,9 +77,9 @@ async def upsert(
 
     # Cabinet
     await session.execute(
-        Cabinet.__table__.insert()
-        .prefix_with("ON CONFLICT (label) DO NOTHING")
+        pg_insert(Cabinet.__table__)
         .values(id=str(uuid.uuid4()), label=body.cabinet, created_at=now)
+        .on_conflict_do_nothing(index_elements=["label"])
     )
     cab = (
         await session.execute(select(Cabinet).where(Cabinet.label == body.cabinet))
@@ -88,9 +89,9 @@ async def upsert(
 
     # Drawer
     await session.execute(
-        Drawer.__table__.insert()
-        .prefix_with("ON CONFLICT (cabinet_id, label) DO NOTHING")
+        pg_insert(Drawer.__table__)
         .values(id=str(uuid.uuid4()), label=body.drawer, cabinet_id=cab.id, created_at=now)
+        .on_conflict_do_nothing(index_elements=["cabinet_id", "label"])
     )
     drw = (
         await session.execute(
@@ -102,9 +103,9 @@ async def upsert(
 
     # File
     await session.execute(
-        File.__table__.insert()
-        .prefix_with("ON CONFLICT (drawer_id, label) DO NOTHING")
+        pg_insert(File.__table__)
         .values(id=str(uuid.uuid4()), label=body.file, drawer_id=drw.id, created_at=now)
+        .on_conflict_do_nothing(index_elements=["drawer_id", "label"])
     )
     fil = (
         await session.execute(
