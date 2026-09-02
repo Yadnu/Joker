@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # Load .env from the project root so credentials are available
 # whether pytest is run from the shell or from an IDE.
 load_dotenv(Path(__file__).parents[2] / ".env", override=True)
+os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-used")
 
 
 def _normalize_db_url(url: str) -> str:
@@ -56,6 +57,12 @@ from box.schema.models import Base  # noqa: E402
 import shared.db as _db_module  # noqa: E402
 import uuid  # noqa: E402
 
+# box/main.py calls load_dotenv(override=True) at import time, which re-sets
+# BOX_TRANSPORT and DATABASE_URL from the .env file. Restore the test overrides
+# now that all application modules have been imported.
+os.environ.pop("BOX_TRANSPORT", None)
+os.environ["DATABASE_URL"] = _test_url
+
 # ---------------------------------------------------------------------------
 # Test database URL
 # ---------------------------------------------------------------------------
@@ -78,6 +85,7 @@ def event_loop():
 async def test_engine():
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield engine
     async with engine.begin() as conn:

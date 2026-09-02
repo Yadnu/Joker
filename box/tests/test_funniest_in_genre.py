@@ -67,3 +67,36 @@ async def test_funniest_empty_genre_does_not_500(client):
     r = await client.get("/genres/NonExistentGenreHTTPXYZ/funniest")
     assert r.status_code == 200
     assert r.json()["jokes"] == []
+
+
+@pytest.mark.asyncio
+async def test_jokes_top_and_genre_coverage(client):
+    p = joke_payload(
+        cabinet="TopCab",
+        drawer="TopDrw",
+        file="TopFile",
+        category="TopGenre",
+        score=9,
+        position=1,
+        joke_text="A high scorer for the archive read.",
+    )
+    p2 = joke_payload(
+        cabinet="TopCab",
+        drawer="TopDrw",
+        file="TopFile",
+        category="TopGenre",
+        score=8,
+        position=2,
+        joke_text="Second high scorer.",
+    )
+    assert (await client.put("/box/upsert", json=p)).status_code == 201
+    assert (await client.put("/box/upsert", json=p2)).status_code == 201
+
+    top = await client.get("/jokes/top?n=5&min_score=7")
+    assert top.status_code == 200, top.text
+    texts = [j["joke_text"] for j in top.json()["jokes"]]
+    assert "A high scorer for the archive read." in texts
+
+    cov = await client.get("/genres/coverage")
+    assert cov.status_code == 200, cov.text
+    assert cov.json()["coverage"]["TopGenre"] >= 2
