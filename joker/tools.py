@@ -1,8 +1,7 @@
 """Joker — Box functions exposed to the voice model as callable tools.
 
-Each function has:
-  - A Python implementation that queries the Box DB directly.
-  - An OpenAI-compatible JSON schema (for the Realtime API session.tools payload).
+Implementations go through shared/box_client.py so swapping BOX_BASE_URL is
+the only change when the winning Box is announced.
 
 Tool calls are NOT independent model calls and do not emit their own trace
 records; they execute within a delivery step that is already traced by
@@ -11,10 +10,9 @@ realtime.py.
 
 from __future__ import annotations
 
-from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from box.schema.models import Joke
+from shared import box_client
 
 # ---------------------------------------------------------------------------
 # Python implementations
@@ -27,55 +25,23 @@ async def funniest_in_genre(
     session: AsyncSession,
 ) -> list[dict]:
     """Return the top-N jokes by score for a given genre."""
-    stmt = (
-        select(Joke.id, Joke.joke_text, Joke.score, Joke.category)
-        .where(Joke.category == genre)
-        .order_by(desc(Joke.score))
-        .limit(max(1, n))
-    )
-    rows = (await session.execute(stmt)).all()
-    return [
-        {"id": r.id, "joke_text": r.joke_text, "score": r.score, "category": r.category}
-        for r in rows
-    ]
+    return await box_client.funniest_in_genre(genre, n, session=session)
 
 
 async def get_thin_genres(session: AsyncSession) -> list[str]:
     """Return genres with fewer than 3 jokes (thin coverage)."""
-    stmt = (
-        select(Joke.category, func.count(Joke.id).label("n"))
-        .group_by(Joke.category)
-        .having(func.count(Joke.id) < 3)
-        .order_by(Joke.category)
-    )
-    rows = (await session.execute(stmt)).all()
-    return [r.category for r in rows]
+    coverage = await box_client.genre_coverage(session=session)
+    return sorted(g for g, n in coverage.items() if n < 3)
 
 
 async def get_recent_scores(n: int, session: AsyncSession) -> list[int]:
     """Return the last N scores recorded (most recent first)."""
-    stmt = (
-        select(Joke.score)
-        .order_by(desc(Joke.created_at))
-        .limit(max(1, n))
-    )
-    rows = (await session.execute(stmt)).scalars().all()
-    return list(rows)
+    return await box_client.recent_scores(n, session=session)
 
 
 async def search_jokes(query: str, session: AsyncSession) -> list[dict]:
     """Full-text search over joke_text (case-insensitive LIKE)."""
-    stmt = (
-        select(Joke.id, Joke.joke_text, Joke.score, Joke.category)
-        .where(Joke.joke_text.ilike(f"%{query}%"))
-        .order_by(desc(Joke.score))
-        .limit(10)
-    )
-    rows = (await session.execute(stmt)).all()
-    return [
-        {"id": r.id, "joke_text": r.joke_text, "score": r.score, "category": r.category}
-        for r in rows
-    ]
+    return await box_client.search_jokes(query, session=session)
 
 
 # ---------------------------------------------------------------------------

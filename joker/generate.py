@@ -1,20 +1,34 @@
 """Joker — joke generation.
 
 Two-path generation:
-  - GOOD_MODEL (gpt-4o)       for intended_quality="good"
-  - BAD_MODEL  (gpt-4o-mini)  for intended_quality="bad"
+  - GENERATE_GOOD (frontier, default o3) for intended_quality="good"
+  - GENERATE_BAD  (cheap, default gpt-4o-mini) for intended_quality="bad"
 
 Deliberate quality variance is a hard requirement.  Both paths must be
 exercised; routing is explicit and stored in provenance.
 
+Three tone levels (independent of intended_quality):
+  1 STANDARD  — mainstream late-night, no content warnings needed
+  2 EDGIER    — gallows humor, cynicism, existential dread played for laughs
+  3 DARKEST   — genuinely bleak, still ceiling-bound; no level beyond this
+
+Model routing depends on intended_quality only, never on tone_level.
+A level-3 joke can be intended-bad; a level-1 joke can be intended-good.
+
 For each call, three candidates are generated and the best (for "good") or
 worst (for "bad") is selected.  selection_rationale is stored in provenance
 and in the trace.
+
+Prompts are versioned files: persona_v1.md + tone_{n}_v1.md are loaded once
+at import time and concatenated as the system prompt.  prompt_ref in the trace
+stores the tone file path so a Viewer can open the exact prompt a joke was
+generated under.
 """
 
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Literal
 
 from openai import AsyncOpenAI
@@ -30,31 +44,68 @@ GOOD_MODEL = GENERATE_GOOD
 BAD_MODEL  = GENERATE_BAD
 _CANDIDATE_COUNT = 3
 
+_PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+
+# Load the persona once; it is prepended to every tone prompt.
+_PERSONA = (_PROMPTS_DIR / "persona_v1.md").read_text(encoding="utf-8").strip()
+
+_TONE_FILE_NAMES: dict[int, str] = {
+    1: "tone_1_standard_v1.md",
+    2: "tone_2_edgier_v1.md",
+    3: "tone_3_darkest_v1.md",
+}
+
+
+def _load_tone(n: int) -> str:
+    raw = (_PROMPTS_DIR / _TONE_FILE_NAMES[n]).read_text(encoding="utf-8")
+    return raw.format(persona=_PERSONA).strip()
+
+
+_TONE_PROMPTS: dict[int, str] = {
+    1: _load_tone(1),
+    2: _load_tone(2),
+    3: _load_tone(3),
+}
+
+# Tone prompt file paths used as prompt_ref in trace (points to the tone file,
+# not the persona, since the tone file governs what kind of joke was requested).
+_TONE_PROMPT_REFS: dict[int, str] = {
+    n: f"prompts/{_TONE_FILE_NAMES[n]}" for n in (1, 2, 3)
+}
+
+# User-prompt templates, kept for the bad-joke path which still uses the
+# original templates.  The good path and all tone paths use the same user
+# template; the system prompt is what varies by tone.
+_GOOD_USER_TEMPLATE = (_PROMPTS_DIR / "generate_good_user_v1.txt").read_text(encoding="utf-8")
+_BAD_USER_TEMPLATE = (_PROMPTS_DIR / "generate_bad_user_v1.txt").read_text(encoding="utf-8")
+
 
 async def generate(
     *,
     joke_id: str,
     topic: str,
-    style: str,
+    tone_level: Literal[1, 2, 3] = 1,
     intended_quality: Literal["good", "bad"],
     user_context: str,
+    set_position: int = 1,
     session: AsyncSession,
+    style: str = "one-liner",
 ) -> tuple[str, Provenance]:
     """Generate a joke and return (joke_text, provenance).
 
-    intended_quality controls both model selection and candidate ranking:
-      "good" -> gpt-4o, keep the sharpest candidate.
-      "bad"  -> gpt-4o-mini, keep the flattest / most groan-worthy candidate.
+    tone_level and intended_quality are INDEPENDENT axes.
+      - tone_level selects the system prompt (1=standard, 2=edgier, 3=darkest)
+      - intended_quality selects the model and candidate ranking strategy
 
     provenance is fully populated so the caller can store it in the joke record.
     """
     model = GOOD_MODEL if intended_quality == "good" else BAD_MODEL
+    system_prompt = _TONE_PROMPTS[tone_level]
+    user_prompt = _user_prompt(topic, style, user_context, intended_quality)
+    prompt_ref = _TONE_PROMPT_REFS[tone_level]
+
     t0 = time.monotonic()
 
-    system_prompt = _system_prompt(intended_quality)
-    user_prompt = _user_prompt(topic, style, user_context, intended_quality)
-
-    # o3 doesn't support n > 1; generate candidates sequentially for reasoning models.
     from shared.models import is_reasoning_model
     if is_reasoning_model(model):
         raw_responses = []
@@ -66,8 +117,7 @@ async def generate(
                 )
             )
             raw_responses.append(r.choices[0].message.content or "")
-        # Synthesise a single response-like object for cost estimation
-        response = r  # last response; usage tracked per-call below
+        response = r  # last response for cost estimation
         candidates = raw_responses
     else:
         response = await _client.chat.completions.create(
@@ -86,7 +136,10 @@ async def generate(
         source="generated",
         model=model,
         prompt=user_prompt,
-        selection_rationale=selection_rationale,
+        selection_rationale=(
+            f"intended_quality={intended_quality!r}, tone_level={tone_level}, "
+            f"set_position={set_position}. {selection_rationale}"
+        ),
     )
 
     await record_step(
@@ -95,12 +148,14 @@ async def generate(
         kind="generation",
         actor="joker.generate",
         model=model,
-        prompt_ref=f"joker/generate_{intended_quality}_v1",
+        prompt_ref=prompt_ref,
         inputs={
             "topic": topic,
             "style": style,
+            "tone_level": tone_level,
             "intended_quality": intended_quality,
             "user_context": user_context,
+            "set_position": set_position,
             "candidate_count": _CANDIDATE_COUNT,
         },
         output={
@@ -109,7 +164,9 @@ async def generate(
             "selection_rationale": selection_rationale,
         },
         rationale=(
-            f"Used {model} for intended_quality={intended_quality!r}. "
+            f"Used {model} for intended_quality={intended_quality!r} at "
+            f"tone_level={tone_level} (prompt: {prompt_ref}). "
+            f"Set position {set_position}. "
             f"Selected from {_CANDIDATE_COUNT} candidates. {selection_rationale}"
         ),
         latency_ms=latency_ms,
@@ -125,37 +182,14 @@ async def generate(
 # ---------------------------------------------------------------------------
 
 
-def _system_prompt(intended_quality: Literal["good", "bad"]) -> str:
-    if intended_quality == "good":
-        return (
-            "You are a sharp stand-up comedian. "
-            "Write tight, punchy jokes with clear setup and a surprising punchline. "
-            "Aim for genuine laughs."
-        )
-    return (
-        "You are a deliberately mediocre comedian. "
-        "Write jokes that are predictable, slightly groan-worthy, or use tired tropes. "
-        "They should be recognisably joke-shaped but not actually funny."
-    )
-
-
 def _user_prompt(
     topic: str,
     style: str,
     user_context: str,
     intended_quality: Literal["good", "bad"],
 ) -> str:
-    quality_note = (
-        "Make it as sharp and funny as possible."
-        if intended_quality == "good"
-        else "Make it deliberately mediocre or groan-worthy."
-    )
-    return (
-        f"Topic: {topic}\n"
-        f"Style: {style}\n"
-        f"Listener context: {user_context}\n"
-        f"Write one {style} joke about {topic}. {quality_note}"
-    )
+    template = _GOOD_USER_TEMPLATE if intended_quality == "good" else _BAD_USER_TEMPLATE
+    return template.format(topic=topic, style=style, user_context=user_context).strip()
 
 
 def _select(
@@ -175,13 +209,13 @@ def _select(
     if intended_quality == "good":
         chosen = max(candidates, key=len)
         rationale = (
-            f"Longest of {len(candidates)} candidates; "
+            f"intended_quality=good; longest of {len(candidates)} candidates; "
             "heuristic for most-developed punchline before live scoring."
         )
     else:
         chosen = min(candidates, key=len)
         rationale = (
-            f"Shortest of {len(candidates)} candidates; "
+            f"intended_quality=bad; shortest of {len(candidates)} candidates; "
             "heuristic for most predictable / flattest delivery."
         )
     return chosen.strip(), rationale
@@ -192,7 +226,7 @@ def _estimate_cost(response, model: str) -> float | None:
     if usage is None:
         return None
     if model == GOOD_MODEL:
-        # gpt-4o: ~$5/1M input, $15/1M output
-        return (usage.prompt_tokens * 5 + usage.completion_tokens * 15) / 1_000_000
+        # o3 pricing (approximate): $10/1M input, $40/1M output
+        return (usage.prompt_tokens * 10 + usage.completion_tokens * 40) / 1_000_000
     # gpt-4o-mini: ~$0.15/1M input, $0.60/1M output
     return (usage.prompt_tokens * 0.15 + usage.completion_tokens * 0.60) / 1_000_000

@@ -15,6 +15,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 from openai import AsyncOpenAI
@@ -25,6 +26,12 @@ from shared.models import SETBUILD_MODEL, build_messages, completion_kwargs
 from shared.trace import record_step
 
 _client = AsyncOpenAI()
+
+# Versioned prompt file, not an inline f-string. See docs/DECISIONS.md
+# 2026-09-01 "Prompts moved to versioned files".
+_PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+_SYSTEM_PROMPT = (_PROMPTS_DIR / "setbuilder_v1.txt").read_text(encoding="utf-8").strip()
+_USER_TEMPLATE = (_PROMPTS_DIR / "setbuilder_user_v1.txt").read_text(encoding="utf-8")
 
 SlotName = Literal["opener", "bit", "callback", "closer"]
 
@@ -85,16 +92,7 @@ async def build_set(
 
     prompt = _build_prompt(angles, listener_context)
 
-    system = (
-        "You are a stand-up comedy set designer. "
-        "Build an ordered set with slots: opener, 2-3 bits, callback, closer. "
-        "Return JSON with keys: "
-        "'slots' (list of {name, joke_text, transition_to_next}), "
-        "'recovery' ({action, line, rationale}). "
-        "transition_to_next must explain the DEPENDENCY between this slot and the next, "
-        "not just describe the next joke. "
-        "Valid recovery actions: skip_to_callback, self_deprecate, pivot_topic, end_set."
-    )
+    system = _SYSTEM_PROMPT
     response = await _client.chat.completions.create(
         **completion_kwargs(
             SETBUILD_MODEL,
@@ -134,7 +132,7 @@ async def build_set(
         kind="set_construction",
         actor="joker.setbuilder",
         model=SETBUILD_MODEL,
-        prompt_ref="joker/setbuilder_v1",
+        prompt_ref="prompts/setbuilder_user_v1.txt",
         inputs={
             "angles": [a.model_dump() for a in angles],
             "listener_context": listener_context,
@@ -245,13 +243,10 @@ def _build_prompt(angles: list[Angle], listener_context: str) -> str:
     angle_lines = "\n".join(
         f"  [{i+1}] {a.genre} / {a.topic} — {a.rationale}" for i, a in enumerate(angles)
     )
-    return (
-        f"Listener context: {listener_context}\n\n"
-        f"Suggested angles:\n{angle_lines}\n\n"
-        "Build an ordered comedy set using these angles. "
-        "Each transition must explain why the next joke follows this one — "
-        "the dependency, not just a description."
-    )
+    return _USER_TEMPLATE.format(
+        listener_context=listener_context,
+        angle_lines=angle_lines,
+    ).strip()
 
 
 def _estimate_cost(response) -> float | None:  # type: ignore[no-untyped-def]

@@ -1,0 +1,4 @@
+Topic: {topic}
+Style: {style}
+Listener context: {user_context}
+Write one {style} joke about {topic}. Make it as sharp and funny as possible.

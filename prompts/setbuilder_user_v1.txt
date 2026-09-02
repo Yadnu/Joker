@@ -1,0 +1,6 @@
+Listener context: {listener_context}
+
+Suggested angles:
+{angle_lines}
+
+Build an ordered comedy set using these angles. Each transition must explain why the next joke follows this one — the dependency, not just a description.
