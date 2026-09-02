@@ -16,8 +16,11 @@ Endpoints:
   GET  /drawers/{drawer_id}/counts
   GET  /files/{file_id}
   GET  /files/{file_id}/counts
+  GET  /jokes/top
   GET  /jokes/{joke_id}
   GET  /jokes/{joke_id}/trace
+  GET  /traces/{artifact_id}
+  GET  /genres/coverage
   GET  /genres/{genre}/funniest
   GET  /export
   GET  /compliance
@@ -47,6 +50,7 @@ from box.schema.responses import (
     AccountCreateOut,
     AccountListOut,
     AccountOut,
+    ArtifactTraceOut,
     CabinetCountsOut,
     CabinetDetailOut,
     CabinetListOut,
@@ -58,10 +62,12 @@ from box.schema.responses import (
     FileCountsOut,
     FileDetailOut,
     FunniestOut,
+    GenreCoverageOut,
     GlobalCountsOut,
     HealthOut,
     JokeOut,
     PathReadOut,
+    TopJokesOut,
     TraceOut,
     TreeOut,
     UpsertOut,
@@ -486,6 +492,26 @@ async def file_counts(
 # Jokes
 # ---------------------------------------------------------------------------
 
+@router.get("/jokes/top", response_model=TopJokesOut)
+async def top_jokes(
+    n: int = Query(default=20, ge=1, le=100),
+    min_score: int = Query(default=7, ge=0, le=10),
+    session: AsyncSession = Depends(get_session),
+) -> TopJokesOut:
+    """Highest-scoring jokes across the archive, used by Librarian.suggest."""
+    jokes = (
+        await session.execute(
+            select(Joke)
+            .where(Joke.score >= min_score)
+            .order_by(Joke.score.desc())
+            .limit(n)
+        )
+    ).scalars().all()
+    return TopJokesOut.model_validate(
+        {"jokes": [_joke_to_dict(j) for j in jokes]}
+    )
+
+
 @router.get("/jokes/{joke_id}", response_model=JokeOut)
 async def get_joke(
     joke_id: str, session: AsyncSession = Depends(get_session)
@@ -514,16 +540,35 @@ async def get_joke_trace(
     ).scalars().all()
     return TraceOut(
         joke_id=joke_id,
-        steps=[
-            {
-                "id": t.id,
-                "kind": t.kind,
-                "actor": t.actor,
-                "rationale": t.rationale,
-                "latency_ms": t.latency_ms,
-            }
-            for t in traces
-        ],
+        steps=[_trace_step_dict(t) for t in traces],
+    )
+
+
+@router.get("/traces/{artifact_id}", response_model=ArtifactTraceOut)
+async def get_traces(
+    artifact_id: str, session: AsyncSession = Depends(get_session)
+) -> ArtifactTraceOut:
+    """Return all trace steps for any artifact, ordered by timestamp.
+
+    Generalizes GET /jokes/{joke_id}/trace: joke traces are scoped by
+    joke_id, but sets (kind="set_construction"/"set_adaptation"/"placement")
+    and categories (kind="classification"/"category_creation") have their
+    own artifact_id values and no dedicated read surface until this route.
+    An artifact_id with zero steps returns an empty list with a 200, not a
+    404 — this endpoint deliberately does not validate that artifact_id
+    belongs to any particular artifact_type. See docs/DECISIONS.md
+    2026-09-01 "Set rationale is read via GET /traces/{artifact_id}".
+    """
+    traces = (
+        await session.execute(
+            select(Trace)
+            .where(Trace.artifact_id == artifact_id)
+            .order_by(Trace.created_at)
+        )
+    ).scalars().all()
+    return ArtifactTraceOut(
+        artifact_id=artifact_id,
+        steps=[_trace_step_dict(t) for t in traces],
     )
 
 
@@ -572,6 +617,19 @@ async def read_by_path(
 # ---------------------------------------------------------------------------
 # Funniest in genre
 # ---------------------------------------------------------------------------
+
+@router.get("/genres/coverage", response_model=GenreCoverageOut)
+async def genre_coverage(
+    session: AsyncSession = Depends(get_session),
+) -> GenreCoverageOut:
+    """Joke counts per category, used by Librarian.suggest for thin-genre detection."""
+    rows = (
+        await session.execute(
+            select(Joke.category, func.count(Joke.id)).group_by(Joke.category)
+        )
+    ).all()
+    return GenreCoverageOut(coverage={row[0]: int(row[1]) for row in rows})
+
 
 @router.get("/genres/{genre}/funniest", response_model=FunniestOut)
 async def funniest_in_genre(
@@ -719,6 +777,21 @@ async def counts(session: AsyncSession = Depends(get_session)) -> GlobalCountsOu
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _trace_step_dict(t: Trace) -> dict:
+    return {
+        "id": t.id,
+        "kind": t.kind,
+        "actor": t.actor,
+        "rationale": t.rationale,
+        "latency_ms": t.latency_ms,
+        "model": t.model,
+        "prompt_ref": t.prompt_ref,
+        "inputs": t.inputs,
+        "output": t.output,
+        "cost": t.cost,
+    }
+
 
 def _joke_to_dict(joke: Joke) -> dict:
     return {
