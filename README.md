@@ -1,23 +1,34 @@
-# Jokebox -- The Box
+# Jokebox
 
 ## 1. What this is
 
-The Box is the archive service for Jokebox. It stores jokes in a four-level
-hierarchy (Cabinet > Drawer > File > Joke), enforces structural rules, and
-answers queries. It is not a classifier. It receives a path and trusts it. All
-judgment about what a joke is, which genre it belongs to, and how funny it
-scored lives in the Librarian. That boundary is deliberate: the Box can be
-audited, replaced, or scaled independently of the classification logic.
+Jokebox is an AI stand-up comedian. It performs over live voice, records how each joke lands, files the result into a strict four-level taxonomy, and keeps a decision trace for every model call and routing choice so a reviewer can see why a bit was suggested, written, scored, classified, and stored.
 
----
+The product is four components with a hard boundary between judgment and storage.
+
+| Component | Owns |
+|-----------|------|
+| The Joker | The voice loop, joke generation, set construction, barge-in, and filing through the Box HTTP API |
+| The Librarian | Pre-generation suggestions, genre assignment, reaction scoring, and the taxonomy. All judgment about what a joke *is* lives here |
+| The Box | The archive API: hierarchy, upsert, validation, queries, accounts, traces, export. It holds **no** classification intelligence |
+| The Viewer | The transparency layer. It renders the archive tree, every joke field, and the decision trace. It does not compute genres or scores |
+
+The Box receives a path (`cabinet` / `drawer` / `file`) and trusts it. It does not infer a category, repair a path, or invent a "General" bucket. If the Librarian hands it a bad path, the Box stores that path. That split is deliberate: the archive can be audited, replaced, or pointed at another Box without moving the comedy brain.
 
 ## 2. Quick start
 
+Verified on this machine: Python **3.14.3**, Node **v24.19.0**, npm **11.17.0**, Box on `http://127.0.0.1:8000`, Viewer on `http://localhost:3000`.
+
+First install is not two minutes (venv, pip, npm). After those exist, start Box then Viewer and open the URLs below.
+
 ### Prerequisites
 
-- Python 3.11 or later (tested on 3.14.3)
-- PostgreSQL -- local or cloud (tested on Neon; any asyncpg-compatible instance)
-- OpenAI API key (the Joker and Librarian need it; the Box alone makes no model calls)
+- Python 3.11 or later (this repo was run with 3.14.3)
+- Node.js 18 or later (Viewer was run with v24.19.0)
+- PostgreSQL, local or cloud (asyncpg DSN; Neon pooler works for the app)
+- `OPENAI_API_KEY` for generation, suggestion, score, classify, metadata
+- `ELEVENLABS_API_KEY` for the default voice provider
+- `DATABASE_URL` and `TEST_DATABASE_URL` (pytest uses a separate database)
 
 ### Install
 
@@ -25,14 +36,32 @@ audited, replaced, or scaled independently of the classification logic.
 git clone https://github.com/cyrano-hiring/jokebox-yadneya-joshi.git
 cd jokebox-yadneya-joshi
 python -m venv env
+```
 
-# Windows
+Windows:
+
+```bash
 .\env\Scripts\activate
-# macOS / Linux
-source env/bin/activate
-
 pip install -r requirements.txt
 ```
+
+macOS / Linux:
+
+```bash
+source env/bin/activate
+pip install -r requirements.txt
+```
+
+`pip install -r requirements.txt` was run in this repo: requirements already satisfied (FastAPI 0.141.1, SQLAlchemy 2.0.52, Alembic 1.19.1, Pydantic 2.13.5, uvicorn 0.52.4, openai 3.6.0).
+
+Viewer:
+
+```bash
+cd viewer
+npm install
+```
+
+`npm install` in `viewer/` completed: 112 packages, already up to date.
 
 ### Configure
 
@@ -40,329 +69,432 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env`. The minimum required fields:
+On Windows, `copy .env.example .env`. Edit `.env`. The file is gitignored. See `.env.example` for Neon `ssl=require` notes and optional model overrides.
+
+Minimum for the Box plus Joker/Librarian:
 
 ```
-DATABASE_URL=postgresql+asyncpg://user:pass@host/db?ssl=require
-TEST_DATABASE_URL=postgresql+asyncpg://user:pass@host/testdb?ssl=require
-OPENAI_API_KEY=sk-...
+DATABASE_URL=postgresql+asyncpg://USER:PASS@HOST/DB?ssl=require
+TEST_DATABASE_URL=postgresql+asyncpg://USER:PASS@HOST/TESTDB?ssl=require
+OPENAI_API_KEY=sk-your-openai-key
+ELEVENLABS_API_KEY=sk_your-elevenlabs-key
+BOX_API_KEY=jbx_YOUR_KEY_SHOWN_ONCE
 ```
 
-If you paste a standard `postgresql://` Neon URL the app normalises it to
-asyncpg format at startup. See `.env.example` for Neon-specific notes and
-optional model overrides.
+`BOX_API_KEY` is the Joker write key (section 3). Viewer:
+
+```bash
+cd viewer
+cp .env.local.example .env.local
+```
+
+Default: `NEXT_PUBLIC_BOX_URL=http://localhost:8000`.
 
 ### Migrate
 
-```bash
-alembic upgrade head
-```
-
-Idempotent. Safe to run on a database that already has the schema.
-
-### Start
+The repo folder `alembic/` shadows the installed Alembic package if you run `python -m alembic` from the repo root. The command below was executed here and reached head (schema already applied):
 
 ```bash
-uvicorn box.main:app --reload
+python -c "from pathlib import Path; import sys; root=Path('.').resolve(); sys.path=[p for p in sys.path if Path(p).resolve()!=root]; from alembic.config import main; sys.argv=['alembic','upgrade','head']; main()"
 ```
 
-API: http://127.0.0.1:8000
-Interactive spec: http://127.0.0.1:8000/docs
+Idempotent.
 
-### Create an account
-
-`PUT /box/upsert` requires a bearer token. Create one account to get a key:
-
-```bash
-curl -s -X POST http://127.0.0.1:8000/accounts \
-  -H "Content-Type: application/json" \
-  -d '{"name": "my-joker"}'
-```
-
-The response includes `"api_key": "jbx_..."`. Copy it immediately. It is shown
-once and never stored in plaintext.
-
-### Seed sample data
+### Seed (optional, empty database only)
 
 ```bash
 python scripts/seed.py
 ```
 
-Files 22 jokes across 3 cabinets, 6 drawers, 11 files. Leaves one file
-(`DarkHumor > Absurdist > Existential`) with a single joke so that
-`GET /compliance` reports a real violation on a fresh install.
+On this database the command exited 1 with: `Account 'seed-account' already exists.` That is expected after the first seed. On a fresh database it files a sample tree and leaves `DarkHumor > Absurdist > Existential` with one joke so `GET /compliance` shows a real violation.
 
-### Run tests
+### Start the Box
+
+```bash
+uvicorn box.main:app --reload --port 8000
+```
+
+- API: http://127.0.0.1:8000
+- Health (run just now): `GET /health` → `{"status":"ok"}`
+- Interactive OpenAPI: http://127.0.0.1:8000/docs (`GET /docs` returned 200)
+
+### Start the Viewer
+
+From `viewer/` (not the repo root; there is no root `package.json`):
+
+```bash
+cd viewer
+npm run dev
+```
+
+- Live show: http://localhost:3000 (`GET /` returned 200)
+- Archive: http://localhost:3000/viewer (`GET /viewer` returned 200)
+
+## 3. Accounts and API keys
+
+Accounts name **who filed** a joke. They do **not** hide the library. Every account reads every joke.
+
+### Create an account
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/accounts \
+  -H "Content-Type: application/json" \
+  -d "{\"name\": \"my-joker\"}"
+```
+
+Status **201**. Shape (`AccountCreateOut`):
+
+```json
+{
+  "id": "<account-uuid>",
+  "name": "my-joker",
+  "api_key": "jbx_YOUR_KEY_SHOWN_ONCE",
+  "created_at": "2026-09-02T00:00:00.000000"
+}
+```
+
+The plaintext `api_key` is returned **once**. The Box stores only `sha256(api_key)`. Duplicate names return **409**. `GET /accounts` and `GET /accounts/{id}` never include the key.
+
+### Header on writes
+
+```
+Authorization: Bearer jbx_YOUR_KEY_SHOWN_ONCE
+```
+
+Not an `X-API-Key` header. Writes (`PUT /box/upsert`, `PUT /jokes/{id}`) use `Depends(require_account)`. Reads are open. Why: accounts scope **identity and attribution**, not visibility. A reviewer with no key can still `GET /box` and `GET /jokes/{id}`.
+
+`PUT /box/upsert` with no `Authorization` header returns **401** with a body naming the missing header. That was hit against this live Box.
+
+### How the Joker authenticates
+
+The Joker does not send `attribution.account` as truth. It sends `Authorization: Bearer` from `BOX_API_KEY` (`shared/box_client.py`, `joker/realtime.py`). On insert the Box sets `joke.account_id` to the resolved account and overwrites `attribution["account"]` with that account's **name**. A spoofed `attribution.account` in the body does not stick. Covered by `box/tests/test_auth.py`.
+
+### What a reviewer should run
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/accounts \
+  -H "Content-Type: application/json" \
+  -d "{\"name\": \"reviewer\"}"
+```
+
+Copy `api_key`, then file one joke (section 7) with:
+
+```bash
+curl -s -X PUT http://127.0.0.1:8000/box/upsert \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer jbx_YOUR_KEY_SHOWN_ONCE" \
+  -d @joke.json
+```
+
+Do not commit the key. Do not paste a real key into this README.
+
+## 4. System design
+
+### Hierarchy and compliance
+
+Box > Cabinet > Drawer > File > Joke. Every level must contain **more than one** child. A cabinet with one drawer is a violation. A file with one joke is a violation.
+
+`GET /compliance` recomputes that rule on every request from live counts. A stored `compliant` flag would go stale the moment the next joke was filed. There is no compliance column.
+
+### Upsert
+
+`PUT /box/upsert` creates cabinet, drawer, and file if missing, then inserts the joke. Inserts use PostgreSQL `ON CONFLICT DO NOTHING` on `(label)` for cabinets and `(parent_id, label)` for drawers and files, then `SELECT` the row. **One** `session.commit()` at the end (`box/router.py`). A failure before commit leaves no orphaned levels.
+
+The code does **not** use `RETURNING` on those inserts. It is conflict-then-select, not lock-based.
+
+### Concurrency
+
+Two Librarians inventing the same path at once: unique constraints plus `ON CONFLICT DO NOTHING`, no `SERIALIZABLE`, no `FOR UPDATE`. The proof is `box/tests/test_concurrency.py` (`test_concurrent_upsert_same_path`): two real threads, one path, one cabinet/drawer/file, two jokes, neither request errors.
+
+### Joke record (ten fields)
+
+Field names are fixed in `box/schema/records.py`.
+
+| Field | Purpose |
+|-------|---------|
+| `prompt_responses` | Ordered turns (`role` + `content`). The joke is the exchange that produced it, not a single string |
+| `joke_text` | The line that was told |
+| `user_reaction` | What the listener did, stored **apart** from the joke because it is a response to the joke, not part of it |
+| `score` | Integer 0-10 from the Librarian rubric |
+| `category` | Genre label assigned by the Librarian (must not be "General") |
+| `metadata` | Topic, style, length, sensitivity flags, theme flags, tone level |
+| `user_context` | Light, non-identifying listener snapshot (age band, region, occupation field, preferences, energy) |
+| `attribution` | `joker` plus `account` (account filled from the bearer, not the body) |
+| `provenance` | `generated` or `curated`, model, prompt, selection rationale |
+| `set_id` | `{ "set": "...", "position": n }` |
+
+### Joker and Librarian contract
+
+The typed contract is `librarian/interface.py` (version `1.0`). Facades: `suggest`, `classify`, `score`, `extract_metadata`.
+
+- Librarian → Joker: ranked `Angle`s (genre, topic, rationale, freshness, tone) **before** generation; after a bit, a `ClassificationResponse` (category, `is_new`, justification, three-label path) and an integer score.
+- Joker → Librarian: `SuggestionRequest` (listener context, history, taxonomy snapshot, preferred tone); `ClassificationRequest` (joke text, reaction, suggested path, snapshot).
+
+The Joker does not import Librarian internals. The Librarian does not import `joker.*`. Box I/O from the Joker goes through `shared/box_client.py` (`BOX_BASE_URL`). The Librarian may read the same database in-process for suggestion and taxonomy.
+
+### Voice loop
+
+Default provider: **ElevenLabs Conversational AI** (`VOICE_PROVIDER=elevenlabs`). Fallback: OpenAI Realtime (`VOICE_PROVIDER=openai`). Browser PCM16 (24 kHz) rides `GET` upgrade `WS /ws/session/{session_id}`. The Box process bridges to the provider. Mic capture and speaker playback run concurrently (`asyncio.gather` of browser→voice and `vs.wait()`). The ElevenLabs session feeds input while output chunks arrive; that is the duplex path.
+
+Barge-in: provider VAD fires; output is cancelled; the partial joke text is stored on the delivery trace; the host speaks an in-character ack from `prompts/realtime_ack_v1.txt`; the client gets `barge_in` and `barge_in_ack` events. The interrupted bit is still **filed as told**. The trace kind is `delivery` with `interrupted: true`, not a separate `barge_in` kind.
+
+The WebSocket route is **not** listed in `/openapi.json`. HTTP routes are.
+
+### Set construction
+
+`joker/setbuilder.py` asks the model for ordered slots (opener, bits, callback, closer). Every non-final slot must include `transition_to_next` or validation fails. A set you could shuffle without losing those sentences is treated as a list, which is a construction failure.
+
+When a bit scores **below 4** (`BOMB_THRESHOLD` in `joker/orchestrator.py`), `adapt_set` runs (skip to callback, self-deprecate, pivot, or end) and writes `kind=set_adaptation`.
+
+Worked example from a real trace, `GET /traces/set_cfd2bb0b3634` (200, 5800 bytes). `kind=set_construction`, rationale: built a 5-slot set, recovery `self_deprecate`.
+
+| Slot | Why the next slot follows |
+|------|---------------------------|
+| Opener | Talking vegetables prime absurd scenarios; next bit uses modern absurdity (influencers) |
+| Bit 1 | Humanized broccoli leads to objects with human traits (superheroes in mundane items) |
+| Bit 2 | People and objects overlap; callback combines the two |
+| Callback | Characters return so the room feels a payoff before the closer |
+| Closer | Last slot (transition may be empty) |
+
+Recovery line on that set stays inside the vegetable theme and admits the miss.
+
+### Trace layer
+
+`shared/trace.py` `record_step` is keyword-only. `rationale` has **no default**. A model call that skips this module does not exist for grading.
+
+Traces persist on the Box. `GET /jokes/{joke_id}/trace` is joke-scoped. `GET /traces/{artifact_id}` is any artifact (joke, set, category, session). The Viewer Trace panel renders kind, actor, model, latency, and rationale.
+
+## 5. The Viewer
+
+Client-only Next.js App Router. No `app/api` routes. No server actions for data. Fetches `NEXT_PUBLIC_BOX_URL`.
+
+| Route | What you get |
+|-------|----------------|
+| http://localhost:3000 | Live show: mic, host, transcript, critic column. WebSocket to the Box |
+| http://localhost:3000/viewer | Archive: tree, joke detail, trace, exports, Query Slot |
+| http://localhost:3000/viewer?joke=`<id>` | Same archive, that joke selected |
+
+- **Tree:** one `GET /box`. Counts on cabinets, drawers, files, jokes. Compliance marks on violating nodes; summary bar names how many and where (`GET /compliance`). The browse tree hides seed-script / RaceCab rows; the compliance bar does **not** hide them.
+- **Joke detail:** one screen, no tabs: path, genre, `joke_text`, `prompt_responses`, score, `user_reaction`, set id and position, metadata, user_context, attribution, provenance.
+- **Trace:** steps for the selected joke (`GET /jokes/{id}/trace`), including rationale.
+- **Exports:** current joke JSON, current joke CSV, whole library JSON, whole library CSV (`GET /export` for the library). Nested fields in CSV are JSON strings.
+- **Query Slot:** on `/viewer`, a mic control that opens a voice session. You speak; audio and transcript come back; a filed joke id on `librarian_step` selects that joke (and its trace) without leaving the page. A session that never files a Box UUID will not open a trace. Treat a live Query Slot pass as part of the demo, not as something this README can guarantee from a curl.
+
+## 6. Models and why
+
+Defaults are in `shared/models.py`. Any name can be overridden by an environment variable of the same name. This machine may pin `GENERATE_GOOD=gpt-4o` in `.env`; the **code** default for good generation and classify is `o3`.
+
+| Component | Default model | Why |
+|-----------|---------------|-----|
+| Librarian.classify | `o3` | Taxonomy is permanent; higher reasoning cost is accepted |
+| Joker.generate (good) | `o3` | Comedy quality is the product |
+| Joker.generate (bad) | `gpt-4o-mini` | Deliberate weaker path; must not silently upgrade |
+| Joker.setbuilder | `o3` | Slot order and transitions need planning |
+| Librarian.suggest | `gpt-4o-mini` | Rank angles; cheap and frequent |
+| Librarian.score | `gpt-4o-mini` | Rubric JSON; fast |
+| Librarian.metadata | `gpt-4o-mini` | Tags only |
+| Voice (default) | ElevenLabs Conversational AI, voice **Charlie** (`IKne3meq5aSn9XLyUdCD`) | Full-duplex agent, VAD, tools; host register is casual US male |
+| Voice (fallback) | OpenAI Realtime `gpt-realtime-2.1` | `VOICE_PROVIDER=openai` |
+
+Full topography, including rows we **did** and **did not** measure: `docs/TOPOGRAPHY.md`.
+
+Measured on live sessions (model/HTTP stages, not TTS): generation often ~1.2-2.5s p50; suggestion ~5-7s; classification ~7-10s; scoring ~1.2-1.8s; filing ~1.2-2.5s. **`tts_first_byte` is recorded as 0** in that file because the tracker currently writes zero on delivery start. Click-to-first-audio-byte has not been measured. Do not treat those zeros as latency.
+
+## 7. API reference
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/health` | Process up |
+| POST | `/accounts` | Create account; returns `api_key` once |
+| GET | `/accounts` | List accounts (no keys) |
+| GET | `/accounts/{account_id}` | One account (no key) |
+| PUT | `/box/upsert` | File a joke; create missing path; bearer required |
+| GET | `/box` | Full tree |
+| GET | `/box/{cabinet}/{drawer}/{file}` | Jokes at a path |
+| GET | `/cabinets` | All cabinets |
+| GET | `/cabinets/{cabinet_id}` | Cabinet plus drawers |
+| GET | `/cabinets/{cabinet_id}/counts` | Counts under a cabinet |
+| GET | `/drawers` | All drawers |
+| GET | `/drawers/{drawer_id}` | Drawer plus files |
+| GET | `/drawers/{drawer_id}/counts` | Counts under a drawer |
+| GET | `/files/{file_id}` | File plus jokes |
+| GET | `/files/{file_id}/counts` | Joke count in a file |
+| GET | `/jokes/top` | High scores |
+| GET | `/jokes/{joke_id}` | One joke |
+| PUT | `/jokes/{joke_id}` | Patch a stored joke; bearer required |
+| GET | `/jokes/{joke_id}/trace` | Trace steps for that joke |
+| GET | `/traces/{artifact_id}` | Trace steps for any artifact |
+| GET | `/genres/coverage` | Per-genre counts |
+| GET | `/genres/{genre}/funniest` | Top-n in a genre |
+| GET | `/export` | Full library JSON |
+| GET | `/compliance` | Live hierarchy violations |
+| GET | `/counts` | Cabinets, drawers, files, jokes |
+| POST | `/joker/reroll` | Darker replacement (or ceiling refusal) |
+| WS | `/ws/session/{session_id}` | Full-duplex voice (not in OpenAPI) |
+
+Live reads this session: `/health`, `/docs`, `/counts`, `/compliance`, `/box`, `/jokes/{id}`, `/traces/{id}`, `/export`, `/openapi.json`.
+
+### Worked example
+
+**1. Create an account** (command in section 3). Expected 201 shape above. `box/tests/test_accounts.py` asserts `api_key` starts with `jbx_`.
+
+**2. File a joke** with all ten fields. Validated with `JokeRecord.model_validate` against current `records.py`. Replace the bearer token.
+
+```bash
+curl -s -X PUT http://127.0.0.1:8000/box/upsert \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer jbx_YOUR_KEY_SHOWN_ONCE" \
+  -d "{
+  \"cabinet\": \"Wordplay\",
+  \"drawer\": \"Puns\",
+  \"file\": \"Animals\",
+  \"joke\": {
+    \"prompt_responses\": [
+      {\"role\": \"system\", \"content\": \"You are a stand-up comedian.\"},
+      {\"role\": \"user\", \"content\": \"Tell me a short pun about animals and GPS.\"},
+      {\"role\": \"assistant\", \"content\": \"I told my GPS I was lost. It said that makes two of us, then rerouted me through a roundabout it also did not understand.\"}
+    ],
+    \"joke_text\": \"I told my GPS I was lost. It said that makes two of us, then rerouted me through a roundabout it also did not understand.\",
+    \"user_reaction\": \"A real laugh, then they repeated the roundabout line.\",
+    \"score\": 7,
+    \"category\": \"Animals\",
+    \"metadata\": {
+      \"topic\": \"GPS and animals\",
+      \"style\": \"one-liner\",
+      \"length\": \"short\",
+      \"sensitivity_flags\": [],
+      \"theme_flags\": [\"failure\"],
+      \"tone_level\": 1
+    },
+    \"user_context\": {
+      \"age_band\": \"25_40\",
+      \"region\": \"US West\",
+      \"occupation_field\": \"tech\",
+      \"humor_preferences\": [\"wordplay\", \"observational\"],
+      \"humor_avoid\": [],
+      \"energy\": \"dry\",
+      \"first_time\": true,
+      \"session_notes\": \"README worked example\"
+    },
+    \"attribution\": {
+      \"joker\": \"joker-v1\",
+      \"account\": \"spoofed-should-not-stick\"
+    },
+    \"provenance\": {
+      \"source\": \"generated\",
+      \"model\": \"gpt-4o\",
+      \"prompt\": \"Tell me a short pun about animals and GPS.\",
+      \"selection_rationale\": \"Worked example for the README.\"
+    },
+    \"set_id\": {\"set\": \"readme-example-set\", \"position\": 1}
+  }
+}"
+```
+
+Expected **201**:
+
+```json
+{
+  "joke_id": "<joke-uuid>",
+  "cabinet_id": "<cabinet-uuid>",
+  "drawer_id": "<drawer-uuid>",
+  "file_id": "<file-uuid>"
+}
+```
+
+**3. Read it back**
+
+```bash
+curl -s http://127.0.0.1:8000/jokes/<joke-uuid>
+```
+
+Expected **200**. Top-level keys match a live `GET /jokes/{id}` on this Box: `id`, `file_id`, `account_id`, plus the ten record fields. `attribution.account` is the **account name from the bearer**, not `spoofed-should-not-stick`. Round-trip of those fields is what `box/tests/test_write.py` asserts.
+
+Live GET example (real row, not the curl above): `GET /jokes/dc9387b4-1cf9-4985-b310-e7a50ceafa5b` returned 200, 2014 bytes, those same keys, `attribution.account` = `Yadneya`.
+
+## 8. Tests
 
 ```bash
 python -m pytest -q
 ```
 
-Expected: **40 passed**
+Run just now: **98 passed, 1 failed** in 68.28s.
 
----
+The failure is `box/tests/test_joker_realtime.py::test_barge_in_cancels_and_traces`, which still asserts the retired OpenAI Realtime snapshot `gpt-4o-realtime-preview-2024-12-17`. Default voice traces `elevenlabs-convai`. Cancel, ack, and `interrupted: true` are still asserted.
 
-## 3. System design
+| File | What it proves |
+|------|----------------|
+| `test_write.py` | Write then read; all ten fields round-trip |
+| `test_upsert_creates_levels.py` | One write creates missing cabinet/drawer/file; second write reuses ids |
+| `test_read.py` | Read by id and by path; 404 names the missing level; export |
+| `test_count.py` | Counts match a known tree |
+| `test_funniest_in_genre.py` | `GET /genres/{genre}/funniest` |
+| `test_structural_validation.py` | Compliance at cabinet, drawer, and file |
+| `test_concurrency.py` | Two threads, same path, no duplicate levels |
+| `test_auth.py` | Bearer on writes; attribution from account; reads open |
+| `test_accounts.py` | Create, 409, no key on GET, global visibility |
+| `test_trace.py` / `test_router_traces.py` | `record_step` and HTTP trace reads |
+| `test_librarian_*.py` | suggest / classify / score / interface |
+| `test_joker_*.py` | generate, setbuilder, tools, stalls, fresh bit, orchestrator, latency, box client |
+| `test_joker_realtime.py` | Barge-in cancel + trace (currently fails on model string) |
 
-### The hierarchy
+## 9. Current state
 
-The Box organises jokes in a four-level tree:
+**Works**
 
-```
-Box
-  Cabinet  (e.g. "Observational")
-    Drawer   (e.g. "Everyday Life")
-      File     (e.g. "Work")
-        Joke
-```
+- Four-level Box, upsert in one transaction, live compliance, open reads, bearer writes
+- Tree, joke detail, trace panel, four export buttons, live show at `/`
+- Separate suggest / generate / score / classify (and metadata) model calls
+- Set construction with stored transitions; bomb path calls `adapt_set`
+- Traces with required rationales, persisted, readable over HTTP
+- ElevenLabs duplex session plus tools (`funniest_in_genre`, `write_fresh_bit`)
 
-Every level must contain more than one child. A cabinet with one drawer is
-non-compliant. A file with one joke is non-compliant. Compliance is computed at
-request time by `GET /compliance`, not stored as a flag. A stored flag goes
-stale the moment the next write happens without updating it; a Box that cannot
-tell you where it is violating the rule at the moment you ask is not finished.
+**Partial**
 
-### Upsert
+- Query Slot is implemented on `/viewer`; it is not proven in this document by a live spoken round-trip
+- `tts_first_byte` in `docs/TOPOGRAPHY.md` is 0; first audio byte is not measured
+- Barge-in is traced as `delivery`, not `kind=barge_in`
+- Many generated jokes have empty `user_context` and placeholder reactions until a landing is patched
+- `Joke.category` sometimes stores a cabinet name rather than the file label
+- Filed `set_id` values include bags `seed-set` and `restored-from-traces`; per-slot transitions live on `set_construction` traces such as `set_cfd2bb0b3634`
+- Intended-bad generation exists in code; the archive barely shows it
+- `docs/TOPOGRAPHY.md` is a latency table, not the full model/cost/set essay
+- OpenAPI omits the WebSocket
+- README expected test count used to say 40; the live count is 98 + 1 fail
 
-One write can create an entire missing path. `PUT /box/upsert` accepts
-`cabinet`, `drawer`, `file`, and a complete joke record. It resolves or creates
-each level, then inserts the joke -- all inside a single database transaction.
-If the joke insert fails after the cabinet, drawer, and file have been created,
-the transaction rolls back and no orphaned levels are left behind.
+**Cut / not claimed**
 
-### Concurrency
+- No committed raw audio (by design)
+- No `milestone-2` git tag at the time of writing (only `milestone-1`)
+- Seed inflation is not used to hide a thin live archive
 
-When two Librarians invent the same category at the same instant, a unique
-constraint on `(cabinet_id, label)` at each level combined with
-`INSERT ... ON CONFLICT DO NOTHING` means exactly one row is created and
-neither request errors. There are no locks, no mutexes, no serialised write
-queue. `test_concurrency.py` proves this: two real OS threads hit the same
-cabinet/drawer/file path simultaneously against the real database, and the
-result is one cabinet, one drawer, one file, and two distinct jokes.
+**Archive as of `GET /counts` and `GET /compliance` this session**
 
-### Multi-user model
+- 3 cabinets, 6 drawers, 16 files, **52 jokes**
+- 16 file-level genres; 11 distinct `Joke.category` strings (labels drift; see Partial)
+- **1 compliance violation:** `DarkHumor > Absurdist > Existential` has 1 joke. That number is **correct**. The seed (and the restore after a prune) left that file thin on purpose so the validator still has something real to report. Do not "fix" it by weakening the checker.
 
-Accounts identify who filed a joke. They scope attribution, not visibility. The
-entire library is readable by anyone without credentials -- `GET /jokes/{id}`,
-`GET /export`, and every other read route are open. The API key on
-`PUT /box/upsert` determines which account name lands in `attribution.account`;
-it cannot be supplied or overridden in the request body. This is attribution,
-not access control: the goal is a trustworthy paper trail, not a private
-library.
+Of the 52, 24 are curated seed (`set=seed-set`) and 28 are generated rows that were restored from traces after an archive prune. Milestone 2 still wants live session material; the restore is disclosed, not hidden.
 
-### The joke record
-
-All ten fields are required on every write.
-
-| Field | Purpose |
-|---|---|
-| `prompt_responses` | Ordered turn sequence (role/content pairs). A joke is the exchange that delivers it. A five-turn knock-knock structure fits natively. |
-| `joke_text` | Full joke as delivered. Stored separately for search and display. |
-| `user_reaction` | What the listener said after the punchline. Stored separately because it is the response to the joke, not part of it. |
-| `score` | Integer 0-10. Assigned by the Librarian against a versioned rubric. |
-| `category` | Genre label. Must match the file label. Never "General". |
-| `metadata` | topic, style, length, and sensitivity_flags. |
-| `user_context` | Per-session listener snapshot: age band, region, occupation, humor preferences, energy level. All fields optional. Non-identifying by design. |
-| `attribution` | joker (which Joker instance) and account (resolved from the bearer token, not the body). |
-| `provenance` | source (generated or curated), model, prompt, selection_rationale. |
-| `set_id` | Which set and position within it. |
-
----
-
-## 4. Technical choices
-
-| Choice | Alternatives considered | Reason |
-|---|---|---|
-| PostgreSQL | SQLite, MySQL | JSONB columns for metadata and provenance; unique constraints plus ON CONFLICT for concurrent category creation; asyncpg driver for async I/O |
-| FastAPI | Django, Flask | Async-first; native Pydantic v2 integration; auto-generated OpenAPI spec that is graded |
-| SQLAlchemy 2.0 + Alembic | Raw asyncpg queries, Tortoise ORM | Type-safe ORM with async support; version-controlled reversible migrations |
-| Pydantic v2 | dataclasses, attrs, marshmallow | Co-designed with FastAPI; strict field validation; `model_dump(mode="json")` for clean JSONB serialisation |
-
-Full decision log with alternatives and costs: [docs/DECISIONS.md](docs/DECISIONS.md)
-
----
-
-## 5. API reference
-
-Full interactive spec with request/response schemas: http://127.0.0.1:8000/docs
-
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | /health | - | Liveness check |
-| POST | /accounts | - | Create account; returns api_key once |
-| GET | /accounts | - | List all accounts (no keys returned) |
-| GET | /accounts/{id} | - | Get account by id |
-| PUT | /box/upsert | Bearer | File a joke; creates missing levels in one transaction |
-| GET | /box | - | Full tree with joke counts |
-| GET | /box/{cabinet}/{drawer}/{file} | - | All jokes at a specific path |
-| GET | /export | - | Full tree with every joke embedded |
-| GET | /cabinets | - | List all cabinets |
-| GET | /cabinets/{id} | - | Cabinet with its drawers |
-| GET | /cabinets/{id}/counts | - | Drawer/file/joke counts under a cabinet |
-| GET | /drawers | - | All drawers, flat list |
-| GET | /drawers/{id} | - | Drawer with its files |
-| GET | /drawers/{id}/counts | - | File/joke counts under a drawer |
-| GET | /files/{id} | - | File with its jokes |
-| GET | /files/{id}/counts | - | Joke count in a file |
-| GET | /jokes/{id} | - | Single joke by id |
-| GET | /jokes/{id}/trace | - | Trace log for a joke |
-| GET | /genres/{genre}/funniest | - | Top-n highest-scoring jokes in a genre (?n=5) |
-| GET | /counts | - | Global counts |
-| GET | /compliance | - | Live hierarchy compliance check |
-
-### Worked example
-
-**Step 1 -- create an account**
-
-```bash
-curl -s -X POST http://127.0.0.1:8000/accounts \
-  -H "Content-Type: application/json" \
-  -d '{"name": "my-joker"}'
-```
-
-```json
-{
-  "id": "2c64f15c-d301-42b5-a23a-a510beacdde8",
-  "name": "my-joker",
-  "api_key": "jbx_...",
-  "created_at": "2026-09-01T19:41:07.367441"
-}
-```
-
-The `api_key` is shown exactly once. Store it now.
-
-**Step 2 -- file a joke (replace `YOUR_API_KEY`)**
-
-```bash
-curl -s -X PUT http://127.0.0.1:8000/box/upsert \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{
-  "cabinet": "Observational",
-  "drawer": "Everyday Life",
-  "file": "Work",
-  "joke": {
-    "prompt_responses": [
-      {"role": "system",    "content": "You are a stand-up comedian."},
-      {"role": "user",      "content": "Tell me a work joke."},
-      {"role": "assistant", "content": "Why do programmers prefer dark mode? Because light attracts bugs."}
-    ],
-    "joke_text":     "Why do programmers prefer dark mode? Because light attracts bugs.",
-    "user_reaction": "Ha! That is actually true.",
-    "score":         8,
-    "category":      "Observational",
-    "metadata": {
-      "topic": "work",
-      "style": "one-liner",
-      "length": "short",
-      "sensitivity_flags": []
-    },
-    "user_context": {
-      "age_band":           "25_40",
-      "occupation_field":   "tech",
-      "humor_preferences":  ["observational", "deadpan"],
-      "energy":             "dry",
-      "first_time":         true
-    },
-    "attribution": {
-      "joker":   "joker-v1",
-      "account": "my-joker"
-    },
-    "provenance": {
-      "source":              "generated",
-      "model":               "gpt-4o",
-      "prompt":              "Tell me a work joke.",
-      "selection_rationale": "Best of three candidates by score."
-    },
-    "set_id": {"set": "evening-set-1", "position": 1}
-  }
-}'
-```
-
-```json
-{
-  "joke_id":    "7fe9d058-0d25-4887-bf90-e1fc20729754",
-  "cabinet_id": "337df5e9-264f-4669-8a09-ecfede22c4bb",
-  "drawer_id":  "...",
-  "file_id":    "..."
-}
-```
-
-**Step 3 -- read it back**
-
-```bash
-curl -s http://127.0.0.1:8000/jokes/7fe9d058-0d25-4887-bf90-e1fc20729754
-```
-
-Returns the full joke record with all ten fields. No auth required.
-
-**Check compliance after seeding**
-
-```bash
-curl -s http://127.0.0.1:8000/compliance
-```
-
-Reports the `DarkHumor > Absurdist > Existential` file as a violation (1 joke).
-
----
-
-## 6. Tests
-
-```bash
-python -m pytest -q   # 40 passed
-```
-
-| File | What it proves | Milestone 1 requirement |
-|---|---|---|
-| test_write.py | All ten fields survive a round-trip with correct types and values | Joke record |
-| test_upsert_creates_levels.py | One write creates the full path; repeat writes do not duplicate levels | Upsert |
-| test_read.py | Read by id, by path, export, and scoped counts all return correct data | API |
-| test_count.py | Global counts and per-cabinet counts match seeded data | API |
-| test_funniest_in_genre.py | Highest scorer returned; tie returns both; empty genre returns empty list | API |
-| test_structural_validation.py | Compliance violations detected at all four levels; computed at request time | Validators |
-| test_concurrency.py | Two OS threads, same path, one category row created, neither errors | Concurrency |
-| test_accounts.py | Attribution stored from bearer token; key absent from list/get responses | Multi-user |
-| test_auth.py | 401 on missing key, 401 on invalid key, 201 on valid key; body account cannot be spoofed | Authentication |
-
----
-
-## 7. Project structure
+## 10. Project structure
 
 ```
-box/
-  main.py             FastAPI application entry point; loads .env
-  router.py           All routes: upsert, read, compliance, funniest, export, accounts
-  schema/
-    models.py         SQLAlchemy ORM: Account, Cabinet, Drawer, File, Joke, Trace
-    records.py        Pydantic models for the joke record and all sub-types
-    responses.py      Pydantic response models for every endpoint
-
-librarian/            Classification intelligence -- not part of the Box
-  interface.py        The typed contract between Librarian and Joker
-  suggest.py          Angle suggestion using listener context and archive coverage
-  classify.py         Taxonomy placement: reuse an existing label or justify a new one
-  score.py            Integer 0-10 score against a versioned rubric
-  metadata.py         topic, style, length, sensitivity flags
-
-joker/                Voice comedian -- not part of the Box
-  realtime.py         Full-duplex voice over WebSocket (OpenAI Realtime API)
-  generate.py         Two-model generation: frontier for good jokes, cheap for bad
-  setbuilder.py       Ordered set with named slots and transition rationale
-  tools.py            Box functions exposed to the voice model as callable tools
-  latency.py          Stage timestamps; p50/p95 in docs/TOPOGRAPHY.md
-
-shared/
-  db.py               Async SQLAlchemy engine and session factory
-  trace.py            record_step() -- every model call is recorded here
-  models.py           Centralised model name registry with env-var overrides
-
-alembic/
-  versions/           Five migrations: 001 initial schema through 005 hashed api key
-
-scripts/
-  seed.py             Sample data loader; includes one deliberate compliance violation
-
-docs/
-  DECISIONS.md        Architecture decisions with alternatives and costs
-  TOPOGRAPHY.md       Latency measurements: p50/p95 per pipeline stage
+box/                 FastAPI Box: router, schema, auth, tests
+  main.py            App, CORS, include routers
+  router.py          HTTP API
+  schema/records.py  Ten joke fields (fixed names)
+  schema/models.py   SQLAlchemy tables and unique constraints
+joker/               Voice, generate, setbuilder, orchestrator, tools
+  realtime.py        WebSocket voice session
+  voice/             ElevenLabs + OpenAI VoiceSession
+  generate.py        Two-path generation
+  setbuilder.py      Ordered sets + recovery
+  orchestrator.py    Suggest → set → generate → score → classify → file
+librarian/           Suggestion, classify, score, metadata, interface.py
+shared/              trace.py, box_client.py, models.py, db.py
+prompts/             Versioned prompt files (prompt_ref points here)
+viewer/              Next.js App Router client
+docs/                DECISIONS.md, TOPOGRAPHY.md
+scripts/seed.py      Sample archive for an empty database
+alembic/             Migrations (folder name shadows the Alembic library)
 ```
