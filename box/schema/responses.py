@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from box.schema.records import Attribution, JokeMetadata, PromptTurn, Provenance, SetId, UserContext
 
@@ -107,10 +107,28 @@ class TraceStepOut(BaseModel):
     actor: str
     rationale: str
     latency_ms: int
+    model: str | None = None
+    prompt_ref: str | None = None
+    inputs: dict = Field(default_factory=dict)
+    output: dict = Field(default_factory=dict)
+    cost: float | None = None
 
 
 class TraceOut(BaseModel):
     joke_id: str
+    steps: list[TraceStepOut]
+
+
+class ArtifactTraceOut(BaseModel):
+    """Returned by GET /traces/{artifact_id}.
+
+    Generalizes TraceOut to any artifact_id (joke, set, category, session, ...)
+    rather than only jokes.  An artifact with no recorded steps returns an
+    empty list, not a 404 — the endpoint does not know or enforce which
+    artifact_type an id belongs to.
+    """
+
+    artifact_id: str
     steps: list[TraceStepOut]
 
 
@@ -203,6 +221,14 @@ class PathReadOut(BaseModel):
 class FunniestOut(BaseModel):
     genre: str
     jokes: list[JokeOut]
+
+
+class TopJokesOut(BaseModel):
+    jokes: list[JokeOut]
+
+
+class GenreCoverageOut(BaseModel):
+    coverage: dict[str, int]
 
 
 # ---------------------------------------------------------------------------

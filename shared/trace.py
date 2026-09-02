@@ -23,6 +23,11 @@ VALID_KINDS: frozenset[str] = frozenset(
         "category_creation",
         "set_construction",
         "set_adaptation",
+        # Reroll lifecycle: user requests a darker version of a joke.
+        # "reroll" records the replacement generation at tone_level+1.
+        # "reroll_refused" records the ceiling hit when tone_level is already 3.
+        "reroll",
+        "reroll_refused",
     }
 )
 

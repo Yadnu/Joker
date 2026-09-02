@@ -59,6 +59,11 @@ def _get_factory() -> async_sessionmaker[AsyncSession]:
     return SessionFactory
 
 
+def session_maker():
+    """Return the process-wide async_sessionmaker, creating it on first use."""
+    return _get_factory()
+
+
 async def get_session() -> AsyncSession:
     """Yield a session suitable for use as a FastAPI dependency."""
     async with _get_factory()() as session:

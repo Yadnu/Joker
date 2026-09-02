@@ -116,6 +116,30 @@ class PromptTurn(BaseModel):
     content: str
 
 
+# ---------------------------------------------------------------------------
+# ThemeFlag — specific thematic content present in the joke.
+#
+# Distinct from HumorStyle: HumorStyle describes comedy register (wordplay,
+# dark, absurdist, …) and is shared with UserContext preferences.  ThemeFlag
+# names the subject-matter territory so the Audience Categorizer can match
+# listener sensitivities to content more precisely than a single "dark" boolean.
+# ---------------------------------------------------------------------------
+
+class ThemeFlag(str, Enum):
+    mortality = "mortality"
+    institutional_failure = "institutional_failure"
+    existential = "existential"
+    medical = "medical"
+    workplace = "workplace"
+    absurdist = "absurdist"
+    self_deprecating = "self_deprecating"
+    topical = "topical"
+    failure = "failure"
+    cynicism = "cynicism"
+    infrastructure = "infrastructure"
+    bureaucracy = "bureaucracy"
+
+
 class JokeMetadata(BaseModel):
     topic: str
     style: str
@@ -123,6 +147,11 @@ class JokeMetadata(BaseModel):
     # Uses HumorStyle so the Audience Categorizer can map listener traits
     # (humor_preferences / humor_avoid) onto sensitivity flags without translation.
     sensitivity_flags: list[HumorStyle] = Field(default_factory=list)
+    # Specific thematic content flags — richer than sensitivity_flags.
+    # The Audience Categorizer maps listener traits to these at the event.
+    theme_flags: list[ThemeFlag] = Field(default_factory=list)
+    # Tone ladder level (1=standard, 2=edgier, 3=darkest) at generation time.
+    tone_level: int = Field(default=1, ge=1, le=3)
 
 
 class Attribution(BaseModel):
