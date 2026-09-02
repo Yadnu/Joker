@@ -1,4 +1,9 @@
-Topic: {topic}
-Style: {style}
-Listener context: {user_context}
-Write one {style} joke about {topic}. Make it as sharp and funny as possible.
+Subject (this is territory, not a finished joke — write a NEW bit, more specific):
+{topic}
+
+Style hint: {style}
+Listener: {user_context}
+
+Write one spoken bit in Eddie's voice. Concrete nouns. Last word funny.
+Do not write "a joke about {topic}". Do not recap the subject. Do not explain.
+Rotate shape: one-liner / escalation / misdirect / story-gone-wrong / fragments.

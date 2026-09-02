@@ -27,11 +27,12 @@ generated under.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from typing import Literal
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, RateLimitError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from box.schema.records import Provenance
@@ -48,6 +49,7 @@ _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 # Load the persona once; it is prepended to every tone prompt.
 _PERSONA = (_PROMPTS_DIR / "persona_v1.md").read_text(encoding="utf-8").strip()
+_GOOD_SYSTEM = (_PROMPTS_DIR / "generate_good_v1.txt").read_text(encoding="utf-8").strip()
 
 _TONE_FILE_NAMES: dict[int, str] = {
     1: "tone_1_standard_v1.md",
@@ -101,33 +103,28 @@ async def generate(
     """
     model = GOOD_MODEL if intended_quality == "good" else BAD_MODEL
     system_prompt = _TONE_PROMPTS[tone_level]
+    if intended_quality == "good":
+        system_prompt = f"{system_prompt}\n\n{_GOOD_SYSTEM}"
     user_prompt = _user_prompt(topic, style, user_context, intended_quality)
     prompt_ref = _TONE_PROMPT_REFS[tone_level]
 
     t0 = time.monotonic()
 
     from shared.models import is_reasoning_model
-    if is_reasoning_model(model):
-        raw_responses = []
-        for _ in range(_CANDIDATE_COUNT):
-            r = await _client.chat.completions.create(
-                **completion_kwargs(
-                    model,
-                    messages=build_messages(system_prompt, user_prompt, model),
-                )
-            )
-            raw_responses.append(r.choices[0].message.content or "")
-        response = r  # last response for cost estimation
-        candidates = raw_responses
-    else:
-        response = await _client.chat.completions.create(
-            **completion_kwargs(
-                model,
-                n=_CANDIDATE_COUNT,
-                messages=build_messages(system_prompt, user_prompt, model),
-            )
-        )
-        candidates = [choice.message.content or "" for choice in response.choices]
+    try:
+        if is_reasoning_model(model):
+            raw_responses = []
+            for _ in range(_CANDIDATE_COUNT):
+                r = await _chat(model, system_prompt, user_prompt, n=1)
+                raw_responses.append(r.choices[0].message.content or "")
+            response = r
+            candidates = raw_responses
+        else:
+            response = await _chat(model, system_prompt, user_prompt, n=_CANDIDATE_COUNT)
+            candidates = [choice.message.content or "" for choice in response.choices]
+    except RateLimitError:
+        print("[429] generate: rate limit exhausted; dropping this joke", flush=True)
+        raise
 
     latency_ms = int((time.monotonic() - t0) * 1000)
     joke_text, selection_rationale = _select(candidates, intended_quality)
@@ -177,9 +174,25 @@ async def generate(
     return joke_text, provenance
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+async def _chat(model: str, system_prompt: str, user_prompt: str, n: int):
+    delay = 0.4
+    last: RateLimitError | None = None
+    for attempt in range(4):
+        try:
+            kwargs = completion_kwargs(
+                model,
+                messages=build_messages(system_prompt, user_prompt, model),
+            )
+            if n > 1:
+                kwargs["n"] = n
+            return await _client.chat.completions.create(**kwargs)
+        except RateLimitError as exc:
+            last = exc
+            print(f"[429] generate attempt {attempt + 1}; backing off {delay}s", flush=True)
+            await asyncio.sleep(delay)
+            delay *= 2
+    assert last is not None
+    raise last
 
 
 def _user_prompt(
@@ -207,10 +220,23 @@ def _select(
         raise ValueError("No candidates returned from model.")
 
     if intended_quality == "good":
-        chosen = max(candidates, key=len)
+        _BANNED = ("here's a joke", "here is a joke", "so anyway", "let me tell")
+        viable = [
+            c.strip()
+            for c in candidates
+            if c.strip() and not any(b in c.lower() for b in _BANNED)
+        ] or [c.strip() for c in candidates if c.strip()]
+        def _punchiness(text: str) -> tuple[int, int]:
+            words = text.split()
+            n = len(words)
+            # Prefer spoken length; penalize essays and one-word stubs.
+            length_score = -abs(n - 28)
+            last_is_short = 1 if words and len(words[-1].strip(".,!?")) <= 10 else 0
+            return (length_score, last_is_short)
+        chosen = max(viable, key=_punchiness)
         rationale = (
-            f"intended_quality=good; longest of {len(candidates)} candidates; "
-            "heuristic for most-developed punchline before live scoring."
+            f"intended_quality=good; "
+            f"picked punchiest of {len(viable)} candidates (spoken length, last-word punch)."
         )
     else:
         chosen = min(candidates, key=len)
