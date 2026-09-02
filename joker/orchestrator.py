@@ -61,7 +61,11 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from openai import AsyncOpenAI
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from box.schema.models import Trace
 
 from box.schema.records import (
     Attribution,
@@ -352,6 +356,16 @@ async def process_reaction(
     if tracker is not None:
         tracker.record(Stage.FILING, int((time.monotonic() - t_file) * 1000))
 
+    filed_id = upsert_result.get("joke_id")
+    if filed_id and gen.joke_id and filed_id != gen.joke_id:
+        await session.execute(
+            update(Trace)
+            .where(Trace.artifact_id == gen.joke_id)
+            .values(artifact_id=filed_id)
+        )
+        gen.joke_id = filed_id
+        slot.joke_id = filed_id
+
     if classification.category not in state.listener_history:
         state.listener_history.append(classification.category)
 
@@ -377,6 +391,7 @@ async def process_reaction(
     return {
         "score": result_score,
         "category": classification.category,
+        "path": list(classification.path),
         "joke_id": upsert_result.get("joke_id"),
         "bombed": result_score < BOMB_THRESHOLD,
         "recovery_applied": recovery_applied,
@@ -398,6 +413,107 @@ def render_set_instructions(state: SessionState) -> str:
         transition = slot.transition_to_next or "close the set"
         lines.append(f"{i + 1}. [{slot.name}] {slot.joke_text}  (then: {transition})")
     return _REALTIME_TEMPLATE.format(set_script="\n".join(lines)).strip()
+
+
+def opening_instructions() -> str:
+    """Short persona prompt for the first 2 seconds. No set script, no Box."""
+    return (
+        "You are Eddie Voss, host of The Late Word. You perform for a room. "
+        "You do not serve a user. Open immediately in character. "
+        "A set script will arrive as a contextual update; until then keep the "
+        "floor. No chatbot greeting. No 'how can I help you.'"
+    )
+
+
+def pick_cold_open() -> str:
+    """Rotate a spoken cold open from prompts/persona.md. No model, no Box."""
+    import random
+
+    text = (_PROMPTS_DIR / "persona.md").read_text(encoding="utf-8")
+    start = text.find("## COLD OPENS")
+    if start < 0:
+        return "We are on. Talk to me."
+    nxt = text.find("\n## ", start + 5)
+    block = text[start:nxt if nxt >= 0 else None]
+    items: list[str] = []
+    buf: list[str] = []
+    for line in block.splitlines()[1:]:
+        if line.startswith("- "):
+            if buf:
+                items.append(" ".join(buf).strip())
+            buf = [line[2:].strip()]
+        elif line.strip() and buf:
+            buf.append(line.strip())
+    if buf:
+        items.append(" ".join(buf).strip())
+    return random.choice(items) if items else "We are on. Talk to me."
+
+
+_COLD_OPEN_SYSTEM = (
+    "You write lines for a live stage performance. "
+    "Generate 2-3 sentences for Eddie Voss to speak the instant the show begins. "
+    "No stage directions, no quotation marks, no 'Hello' or 'Good evening' or 'Welcome'. "
+    "Start mid-thought or mid-observation as if he's already been in the room for a minute. "
+    "End on a line that implicitly hands the floor to the room — "
+    "a question posed to the air, or a setup that needs an audience to land. "
+    "Match his voice exactly: declarative, slightly world-weary, a few beats ahead of the room."
+)
+
+
+async def generate_cold_open(
+    state: SessionState,
+    session: AsyncSession,
+) -> str:
+    """Generate a fresh, per-session cold open for Eddie Voss.
+
+    Uses gpt-4o-mini for speed (< 500 ms typical).  Temperature 1.0 produces
+    variance across sessions so the opening never sounds scripted.
+    Traced so the model call is on the record.
+    """
+    persona_text = (_PROMPTS_DIR / "persona.md").read_text(encoding="utf-8").strip()
+    angles_summary = "; ".join(
+        f"{a.genre}/{a.topic}" for a in state.angles[:3]
+    ) or "general material"
+
+    user_msg = (
+        f"CHARACTER:\n{persona_text}\n\n"
+        f"Tonight's set covers: {angles_summary}\n\n"
+        "Write the cold open now."
+    )
+
+    client = AsyncOpenAI()
+    t0 = time.monotonic()
+    response = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": _COLD_OPEN_SYSTEM},
+            {"role": "user", "content": user_msg},
+        ],
+        temperature=1.0,
+        max_tokens=120,
+    )
+    latency_ms = int((time.monotonic() - t0) * 1000)
+    text = (response.choices[0].message.content or "").strip()
+
+    await record_step(
+        artifact_id=state.joke_set.set_id,
+        artifact_type="set",
+        kind="generation",
+        actor="joker.orchestrator",
+        model="gpt-4o-mini",
+        prompt_ref="prompts/persona.md",
+        inputs={"angles": angles_summary},
+        output={"cold_open": text},
+        rationale=(
+            "Generated a per-session cold open from the host persona and tonight's "
+            "set angles so the host speaks unprompted on connect and the opening "
+            "varies between sessions."
+        ),
+        latency_ms=latency_ms,
+        cost=None,
+        session=session,
+    )
+    return text
 
 
 async def _steer_remaining(

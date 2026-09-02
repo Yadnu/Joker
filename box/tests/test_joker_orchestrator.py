@@ -177,6 +177,68 @@ async def test_process_reaction_calls_pipeline_in_order(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_process_reaction_relinks_pre_file_traces_to_box_id(db, monkeypatch):
+    from shared.trace import record_step
+
+    order: list[str] = []
+    monkeypatch.setattr(box_client, "_client_factory", _mock_box_transport(order))
+    state = _base_state()
+
+    await record_step(
+        artifact_id="joke_orch_1",
+        artifact_type="joke",
+        kind="generation",
+        actor="joker.generate",
+        model="gpt-4o-mini",
+        prompt_ref="prompts/generate_bad_v1.txt",
+        inputs={"topic": "TSA topic"},
+        output={"joke_text": "TSA topic"},
+        rationale="Deliberate bad bit for the first slot.",
+        latency_ms=8,
+        cost=None,
+        session=db,
+    )
+
+    with patch("joker.orchestrator.score", new=AsyncMock(return_value=8)), \
+         patch(
+             "joker.orchestrator.classify",
+             new=AsyncMock(
+                 return_value=ClassificationResponse(
+                     category="AirportSecurity",
+                     is_new=False,
+                     justification="Existing label fits.",
+                     path=["Travel", "Airports", "AirportSecurity"],
+                 )
+             ),
+         ), \
+         patch(
+             "joker.orchestrator.extract_metadata",
+             new=AsyncMock(
+                 return_value=JokeMetadata(
+                     topic="TSA", style="one-liner", length="short", sensitivity_flags=[]
+                 )
+             ),
+         ):
+        result = await orchestrator.process_reaction(
+            state=state,
+            slot_idx=0,
+            user_reaction="Ha! That's exactly what happened.",
+            session=db,
+        )
+
+    assert result["joke_id"] == "joke_filed_orch_1"
+    gen_row = (
+        await db.execute(
+            select(Trace).where(
+                Trace.kind == "generation",
+                Trace.rationale == "Deliberate bad bit for the first slot.",
+            )
+        )
+    ).scalar_one()
+    assert gen_row.artifact_id == "joke_filed_orch_1"
+
+
+@pytest.mark.asyncio
 async def test_low_score_triggers_adapt_set(db, monkeypatch):
     order: list[str] = []
     monkeypatch.setattr(box_client, "_client_factory", _mock_box_transport(order))
