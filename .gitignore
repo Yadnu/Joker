@@ -5,3 +5,6 @@ node_modules/
 .next/
 data/audio/
 .venv/
+viewer/.env.local
+viewer/tsconfig.tsbuildinfo
+.pytest_cache/
