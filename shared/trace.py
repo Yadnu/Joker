@@ -6,7 +6,11 @@ A call that is not recorded here does not exist for grading purposes.
 
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
+
+_LOG = logging.getLogger("shared.trace")
 
 from box.schema.models import Trace
 
@@ -89,4 +93,14 @@ async def record_step(
         cost=cost,
     )
     session.add(row)
-    await session.flush()
+    try:
+        await session.flush()
+    except Exception:
+        _LOG.exception(
+            "record_step failed artifact_id=%s artifact_type=%s kind=%s actor=%s",
+            artifact_id,
+            artifact_type,
+            kind,
+            actor,
+        )
+        raise

@@ -40,7 +40,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -533,11 +533,7 @@ async def get_joke_trace(
     ).scalar_one_or_none()
     if joke is None:
         raise _level_error("joke", f"Joke '{joke_id}' not found.")
-    traces = (
-        await session.execute(
-            select(Trace).where(Trace.artifact_id == joke_id).order_by(Trace.created_at)
-        )
-    ).scalars().all()
+    traces = await _traces_for_joke(session, joke)
     return TraceOut(
         joke_id=joke_id,
         steps=[_trace_step_dict(t) for t in traces],
@@ -777,6 +773,50 @@ async def counts(session: AsyncSession = Depends(get_session)) -> GlobalCountsOu
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+async def _traces_for_joke(session: AsyncSession, joke: Joke) -> list[Trace]:
+    """Collect every decision step that belongs to this filed joke.
+
+    Upsert mints a UUID; generation/scoring/delivery traces are written
+    earlier against joke_{hex}. Classification is keyed to category:{label}.
+    Join those rows by matching joke_text so the Viewer panel is not empty
+    of the actual decision trail.
+    """
+    gen_ids = (
+        await session.execute(
+            select(Trace.artifact_id).where(
+                Trace.kind == "generation",
+                Trace.output["joke_text"].as_string() == joke.joke_text,
+            )
+        )
+    ).scalars().all()
+    input_ids = (
+        await session.execute(
+            select(Trace.artifact_id).where(
+                Trace.artifact_type == "joke",
+                Trace.inputs["joke_text"].as_string() == joke.joke_text,
+            )
+        )
+    ).scalars().all()
+    artifact_ids = {joke.id, *gen_ids, *input_ids}
+    cat_id = f"category:{joke.category}"
+    traces = (
+        await session.execute(
+            select(Trace)
+            .where(
+                or_(
+                    Trace.artifact_id.in_(artifact_ids),
+                    and_(
+                        Trace.artifact_id == cat_id,
+                        Trace.inputs["joke_text"].as_string() == joke.joke_text,
+                    ),
+                )
+            )
+            .order_by(Trace.created_at)
+        )
+    ).scalars().all()
+    return list(traces)
+
 
 def _trace_step_dict(t: Trace) -> dict:
     return {

@@ -187,9 +187,13 @@ function TraceFooter({ steps }: { steps: TraceStep[] }) {
 // ---------------------------------------------------------------------------
 
 export default function Trace({ jokeId }: { jokeId: string | null }) {
-  const { data: trace, isLoading } = useQuery({
+  const { data: trace, isLoading, isError, error } = useQuery({
     queryKey: ['trace', jokeId],
-    queryFn: () => fetchTrace(jokeId!),
+    queryFn: async () => {
+      const data = await fetchTrace(jokeId!)
+      console.debug('[trace] GET /jokes/%s/trace', jokeId, data)
+      return data
+    },
     enabled: jokeId !== null,
     staleTime: 60_000,
   })
@@ -208,6 +212,14 @@ export default function Trace({ jokeId }: { jokeId: string | null }) {
         {[1, 2, 3].map((i) => (
           <div key={i} className="h-14 rounded bg-raised" />
         ))}
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="p-4 font-mono text-[10px] text-violation/70">
+        Failed to load trace{error instanceof Error ? `: ${error.message}` : '.'}
       </div>
     )
   }

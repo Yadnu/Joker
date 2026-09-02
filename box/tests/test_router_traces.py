@@ -90,6 +90,83 @@ async def test_traces_works_for_non_joke_artifact_types(db):
 
 
 @pytest.mark.asyncio
+async def test_joke_trace_includes_pre_file_generation_id(client, test_session_factory):
+    """Viewer reads GET /jokes/{box_uuid}/trace. Generation/scoring traces
+    are written against joke_{hex} before upsert mints a UUID, so an exact
+    artifact_id match would hide the decision trail."""
+    from shared.trace import record_step
+
+    joke_text = "Unique pretzels-at-TSA punchline for trace linkage."
+    p = joke_payload(
+        cabinet="TraceLinkCab",
+        drawer="TraceLinkDrw",
+        file="TraceLinkFile",
+        joke_text=joke_text,
+    )
+    r = await client.put("/box/upsert", json=p)
+    assert r.status_code == 201, r.text
+    joke_id = r.json()["joke_id"]
+    gen_id = "joke_prefile_link1"
+
+    async with test_session_factory() as session:
+        await record_step(
+            artifact_id=gen_id,
+            artifact_type="joke",
+            kind="generation",
+            actor="joker.generate",
+            model="gpt-4o",
+            prompt_ref="prompts/generate_good_v1.txt",
+            inputs={"topic": "TSA pretzels"},
+            output={"joke_text": joke_text},
+            rationale="Selected the punchiest of three TSA pretzel candidates.",
+            latency_ms=40,
+            cost=None,
+            session=session,
+        )
+        await record_step(
+            artifact_id=gen_id,
+            artifact_type="joke",
+            kind="scoring",
+            actor="librarian.score",
+            model="gpt-4o-mini",
+            prompt_ref="prompts/score_user_v1.txt",
+            inputs={"joke_text": joke_text, "user_reaction": "Ha."},
+            output={"score": 7},
+            rationale="Laugh plus callback; seven on the rubric.",
+            latency_ms=12,
+            cost=None,
+            session=session,
+        )
+        await record_step(
+            artifact_id="category:Observational",
+            artifact_type="category",
+            kind="classification",
+            actor="librarian.classify",
+            model="o3",
+            prompt_ref="prompts/classify_user_v1.txt",
+            inputs={"joke_text": joke_text, "user_reaction": "Ha."},
+            output={"category": "Observational", "is_new": False},
+            rationale="Existing Observational label fits the pretzel bit.",
+            latency_ms=20,
+            cost=None,
+            session=session,
+        )
+        await session.commit()
+
+    r2 = await client.get(f"/jokes/{joke_id}/trace")
+    assert r2.status_code == 200, r2.text
+    kinds = [s["kind"] for s in r2.json()["steps"]]
+    assert "generation" in kinds
+    assert "scoring" in kinds
+    assert "classification" in kinds
+    gen_step = next(s for s in r2.json()["steps"] if s["kind"] == "generation")
+    assert gen_step["actor"] == "joker.generate"
+    assert gen_step["model"] == "gpt-4o"
+    assert "punchiest" in gen_step["rationale"]
+    assert gen_step["latency_ms"] == 40
+
+
+@pytest.mark.asyncio
 async def test_traces_unknown_artifact_returns_empty_not_404(client):
     r = await client.get("/traces/no-such-artifact-id-xyz")
     assert r.status_code == 200
