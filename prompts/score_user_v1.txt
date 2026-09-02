@@ -1,0 +1,13 @@
+Scoring rubric (version {rubric_version}):
+{rubric_text}
+
+Joke:
+{joke_text}
+
+User reaction:
+{user_reaction}
+
+Listener context:
+{user_context}
+
+Return a JSON object with a single key 'score' (integer 0-10) and a key 'rationale' (one sentence).

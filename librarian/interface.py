@@ -14,6 +14,14 @@ from box.schema.records import UserContext
 INTERFACE_VERSION = "1.0"
 
 
+def assert_compatible_version(version: str) -> None:
+    """Reject requests stamped with a different contract version."""
+    if version != INTERFACE_VERSION:
+        raise ValueError(
+            f"Unsupported interface version {version!r}; expected {INTERFACE_VERSION}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Suggestion contract
 # Used by suggest.py (producer) and joker components (consumer).
@@ -37,6 +45,18 @@ class SuggestionRequest(BaseModel):
             "Pass today's date if you want the live snapshot."
         )
     )
+    # Per-session tone preference signal.  None means no preference established
+    # yet (use the listener's humor_preferences if set, otherwise default to 1).
+    # Computed by the orchestrator from the running tone-score history.
+    preferred_tone_level: int | None = Field(
+        default=None,
+        ge=1,
+        le=3,
+        description=(
+            "The tone level that has scored highest for this listener so far. "
+            "None until at least one scored joke exists in the session."
+        ),
+    )
 
 
 class Angle(BaseModel):
@@ -53,6 +73,17 @@ class Angle(BaseModel):
         description=(
             "0 = genre is well-covered (many jokes exist); "
             "1 = genre is thin (fewer than 3 jokes)."
+        ),
+    )
+    # Recommended tone level for this angle, set by the Librarian based on
+    # listener preference history.  1 is the safe default for new listeners.
+    tone_level: int = Field(
+        default=1,
+        ge=1,
+        le=3,
+        description=(
+            "Tone level that the Librarian recommends for this angle "
+            "given the listener's scored history (1=standard, 2=edgier, 3=darkest)."
         ),
     )
 
@@ -116,3 +147,54 @@ class ClassificationResponse(BaseModel):
         min_length=3,
         description="[cabinet_label, drawer_label, file_label].",
     )
+
+
+# ---------------------------------------------------------------------------
+# Call facade — Joker imports these, never librarian.suggest/classify/score.
+# Lazy imports avoid a cycle (those modules import the models above).
+# ---------------------------------------------------------------------------
+
+
+async def suggest(request: SuggestionRequest, session: object) -> SuggestionResponse:
+    from librarian.suggest import suggest as _suggest
+
+    return await _suggest(request, session)
+
+
+async def classify(
+    request: ClassificationRequest, session: object
+) -> ClassificationResponse:
+    from librarian.classify import classify as _classify
+
+    return await _classify(request, session)
+
+
+async def score(
+    *,
+    joke_id: str,
+    joke_text: str,
+    user_reaction: str,
+    user_context: str,
+    session: object,
+) -> int:
+    from librarian.score import score as _score
+
+    return await _score(
+        joke_id=joke_id,
+        joke_text=joke_text,
+        user_reaction=user_reaction,
+        user_context=user_context,
+        session=session,
+    )
+
+
+async def extract_metadata(
+    *,
+    joke_id: str,
+    joke_text: str,
+    tone_level: int = 1,
+    session: object,
+):
+    from librarian.metadata import extract_metadata as _extract
+
+    return await _extract(joke_id=joke_id, joke_text=joke_text, tone_level=tone_level, session=session)

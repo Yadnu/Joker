@@ -14,20 +14,32 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 
 from openai import AsyncOpenAI
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from box.schema.models import Cabinet, Drawer, File
 from librarian.interface import (
     ClassificationRequest,
     ClassificationResponse,
+    assert_compatible_version,
 )
+from shared import box_client
 from shared.models import CLASSIFY_MODEL, build_messages, completion_kwargs
 from shared.trace import record_step
 
 _client = AsyncOpenAI()
+
+# Versioned prompt file, not an inline f-string. See docs/DECISIONS.md
+# 2026-09-01 "Prompts moved to versioned files".
+_PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+_SYSTEM_PROMPT = (_PROMPTS_DIR / "classify_v1.txt").read_text(encoding="utf-8").strip()
+_USER_TEMPLATE = (_PROMPTS_DIR / "classify_user_v1.txt").read_text(encoding="utf-8")
 
 
 async def classify(
@@ -41,20 +53,12 @@ async def classify(
     row when a new label is created.
     """
     t0 = time.monotonic()
+    assert_compatible_version(request.version)
 
     taxonomy = await _fetch_taxonomy(session)
     prompt = _build_prompt(request, taxonomy)
 
-    system = (
-        "You are the Librarian for an AI comedian. "
-        "Given a joke and the current taxonomy, decide whether to "
-        "assign an existing category or create a new one. "
-        "Return JSON with keys: category (str), is_new (bool), "
-        "justification (str, non-empty), "
-        "path ([cabinet_label, drawer_label, file_label]). "
-        "Never use 'General' as a category. "
-        "justification is REQUIRED whether is_new is true or false."
-    )
+    system = _SYSTEM_PROMPT
     model_t0 = time.monotonic()
     response = await _client.chat.completions.create(
         **completion_kwargs(
@@ -99,13 +103,13 @@ async def classify(
         kind="classification",
         actor="librarian.classify",
         model=CLASSIFY_MODEL,
-        prompt_ref="librarian/classify_v1",
+        prompt_ref="prompts/classify_user_v1.txt",
         inputs={
             "joke_text": request.joke_text,
             "user_reaction": request.user_reaction,
             "taxonomy_snapshot_version": request.taxonomy_snapshot_version,
             "suggested_path": request.suggested_path,
-            "existing_labels": [c["label"] for c in taxonomy],
+            "existing_labels": [c["file"] for c in taxonomy],
         },
         output=result.model_dump(),
         rationale=justification,
@@ -143,31 +147,19 @@ async def classify(
 
 
 async def _fetch_taxonomy(session: AsyncSession) -> list[dict]:
-    stmt = (
-        select(Cabinet.label, Drawer.label, File.label, File.id)
-        .join(Drawer, Drawer.cabinet_id == Cabinet.id)
-        .join(File, File.drawer_id == Drawer.id)
-        .order_by(Cabinet.label, Drawer.label, File.label)
-    )
-    rows = (await session.execute(stmt)).all()
-    return [
-        {"cabinet": r[0], "drawer": r[1], "file": r[2], "file_id": r[3]}
-        for r in rows
-    ]
+    return await box_client.taxonomy(session=session)
 
 
 def _build_prompt(request: ClassificationRequest, taxonomy: list[dict]) -> str:
     tax_lines = "\n".join(
         f"  {t['cabinet']} > {t['drawer']} > {t['file']}" for t in taxonomy[:60]
     ) or "  (taxonomy is empty)"
-    return (
-        f"Joke:\n{request.joke_text}\n\n"
-        f"User reaction:\n{request.user_reaction}\n\n"
-        f"Suggested path from pre-generation step: {request.suggested_path or 'none'}\n\n"
-        f"Current taxonomy (cabinet > drawer > file):\n{tax_lines}\n\n"
-        "Decide: reuse an existing file label, or create a new path. "
-        "Provide a non-empty justification either way."
-    )
+    return _USER_TEMPLATE.format(
+        joke_text=request.joke_text,
+        user_reaction=request.user_reaction,
+        suggested_path=request.suggested_path or "none",
+        taxonomy=tax_lines,
+    ).strip()
 
 
 async def _create_category(
@@ -177,49 +169,41 @@ async def _create_category(
 
     Uses ON CONFLICT DO NOTHING so concurrent writers cannot double-insert.
     Each level selects the existing row if RETURNING yields nothing.
+    New-file justification is stored on File.category_justification.
     """
     cabinet_label, drawer_label, file_label = path
-
-    # Cabinet
-    from box.schema.models import Cabinet as CabinetModel, Drawer as DrawerModel, File as FileModel
-    import uuid
-    from datetime import datetime, timezone
-
     now = datetime.now(timezone.utc)
 
     await session.execute(
-        CabinetModel.__table__.insert()
-        .prefix_with("ON CONFLICT (label) DO NOTHING")
+        pg_insert(Cabinet.__table__)
         .values(id=str(uuid.uuid4()), label=cabinet_label, created_at=now)
+        .on_conflict_do_nothing(index_elements=["label"])
     )
     cab_row = (
-        await session.execute(
-            select(CabinetModel).where(CabinetModel.label == cabinet_label)
-        )
+        await session.execute(select(Cabinet).where(Cabinet.label == cabinet_label))
     ).scalar_one()
 
     await session.execute(
-        DrawerModel.__table__.insert()
-        .prefix_with("ON CONFLICT (cabinet_id, label) DO NOTHING")
+        pg_insert(Drawer.__table__)
         .values(
             id=str(uuid.uuid4()),
             label=drawer_label,
             cabinet_id=cab_row.id,
             created_at=now,
         )
+        .on_conflict_do_nothing(index_elements=["cabinet_id", "label"])
     )
     drw_row = (
         await session.execute(
-            select(DrawerModel).where(
-                DrawerModel.cabinet_id == cab_row.id,
-                DrawerModel.label == drawer_label,
+            select(Drawer).where(
+                Drawer.cabinet_id == cab_row.id,
+                Drawer.label == drawer_label,
             )
         )
     ).scalar_one()
 
     await session.execute(
-        FileModel.__table__.insert()
-        .prefix_with("ON CONFLICT (drawer_id, label) DO NOTHING")
+        pg_insert(File.__table__)
         .values(
             id=str(uuid.uuid4()),
             label=file_label,
@@ -227,7 +211,18 @@ async def _create_category(
             category_justification=justification,
             created_at=now,
         )
+        .on_conflict_do_nothing(index_elements=["drawer_id", "label"])
     )
+    file_row = (
+        await session.execute(
+            select(File).where(
+                File.drawer_id == drw_row.id,
+                File.label == file_label,
+            )
+        )
+    ).scalar_one()
+    if not file_row.category_justification:
+        file_row.category_justification = justification
     await session.flush()
 
 

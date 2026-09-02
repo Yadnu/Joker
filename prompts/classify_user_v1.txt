@@ -1,0 +1,12 @@
+Joke:
+{joke_text}
+
+User reaction:
+{user_reaction}
+
+Suggested path from pre-generation step: {suggested_path}
+
+Current taxonomy (cabinet > drawer > file):
+{taxonomy}
+
+Decide: reuse an existing file label, or create a new path. Prefer reuse. Create a new FILE under an existing drawer that already has other files — never a lone cabinet or drawer (that is a taxonomy of singletons). Provide a non-empty justification either way.

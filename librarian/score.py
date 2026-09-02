@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +28,12 @@ RUBRIC: dict[int, str] = {
     10: "Sustained laughter; listener repeats the punchline, asks for more, or says it was the best joke they've heard.",
 }
 
+# Versioned prompt file, not an inline f-string. See docs/DECISIONS.md
+# 2026-09-01 "Prompts moved to versioned files".
+_PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+_SYSTEM_PROMPT = (_PROMPTS_DIR / "score_v1.txt").read_text(encoding="utf-8").strip()
+_USER_TEMPLATE = (_PROMPTS_DIR / "score_user_v1.txt").read_text(encoding="utf-8")
+
 
 async def score(
     *,
@@ -44,20 +51,15 @@ async def score(
     t0 = time.monotonic()
 
     rubric_text = "\n".join(f"  {k}: {v}" for k, v in sorted(RUBRIC.items()))
-    prompt = (
-        f"Scoring rubric (version {RUBRIC_VERSION}):\n{rubric_text}\n\n"
-        f"Joke:\n{joke_text}\n\n"
-        f"User reaction:\n{user_reaction}\n\n"
-        f"Listener context:\n{user_context}\n\n"
-        "Return a JSON object with a single key 'score' (integer 0-10) "
-        "and a key 'rationale' (one sentence)."
-    )
+    prompt = _USER_TEMPLATE.format(
+        rubric_version=RUBRIC_VERSION,
+        rubric_text=rubric_text,
+        joke_text=joke_text,
+        user_reaction=user_reaction,
+        user_context=user_context,
+    ).strip()
 
-    system = (
-        "You are a neutral comedy evaluator. "
-        "Score the joke strictly against the provided rubric anchors. "
-        "Interpolate linearly between anchors."
-    )
+    system = _SYSTEM_PROMPT
     response = await _client.chat.completions.create(
         **completion_kwargs(
             SCORE_MODEL,
@@ -70,7 +72,9 @@ async def score(
 
     raw = json.loads(response.choices[0].message.content or "{}")
     result_score = int(raw.get("score", 5))
-    rationale: str = raw.get("rationale", "No rationale provided by model.").strip()
+    rationale: str = str(raw.get("rationale") or "").strip()
+    if not rationale:
+        raise ValueError("score rationale is required and must be a non-empty string.")
 
     # Clamp to valid range
     result_score = max(0, min(10, result_score))
@@ -81,7 +85,7 @@ async def score(
         kind="scoring",
         actor="librarian.score",
         model=SCORE_MODEL,
-        prompt_ref="librarian/score_v1",
+        prompt_ref="prompts/score_user_v1.txt",
         inputs={
             "joke_text": joke_text,
             "user_reaction": user_reaction,

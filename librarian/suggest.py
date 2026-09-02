@@ -14,18 +14,19 @@ UserContext fields were non-null and drove the model prompt.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from openai import AsyncOpenAI
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from box.schema.models import Joke
 from box.schema.records import UserContext
 from librarian.interface import (
     Angle,
     SuggestionRequest,
     SuggestionResponse,
+    assert_compatible_version,
 )
+from shared import box_client
 from shared.models import SUGGEST_MODEL, build_messages, completion_kwargs
 from shared.trace import record_step
 
@@ -33,6 +34,12 @@ _client = AsyncOpenAI()
 
 _THIN_THRESHOLD = 3
 _HIGH_SCORE_THRESHOLD = 7
+
+# Versioned prompt file, not an inline f-string. See docs/DECISIONS.md
+# 2026-09-01 "Prompts moved to versioned files".
+_PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+_SYSTEM_PROMPT = (_PROMPTS_DIR / "suggest_v1.txt").read_text(encoding="utf-8").strip()
+_USER_TEMPLATE = (_PROMPTS_DIR / "suggest_user_v1.txt").read_text(encoding="utf-8")
 
 
 async def suggest(
@@ -49,21 +56,18 @@ async def suggest(
     The trace step names every field that influenced the output.
     """
     t0 = time.monotonic()
+    assert_compatible_version(request.version)
+
+    # --- Determine preferred tone level -------------------------------------
+    preferred_tone = request.preferred_tone_level or 1
 
     # --- Query 1: high-scoring jokes ----------------------------------------
-    high_result = await session.execute(
-        select(Joke.category, Joke.joke_text, Joke.score)
-        .where(Joke.score >= _HIGH_SCORE_THRESHOLD)
-        .order_by(Joke.score.desc())
-        .limit(20)
+    high_rows = await box_client.high_scorers(
+        session=session, min_score=_HIGH_SCORE_THRESHOLD
     )
-    high_rows = high_result.all()
 
     # --- Query 2: genre coverage counts -------------------------------------
-    coverage_result = await session.execute(
-        select(Joke.category, func.count(Joke.id).label("n")).group_by(Joke.category)
-    )
-    coverage: dict[str, int] = {row.category: row.n for row in coverage_result.all()}
+    coverage = await box_client.genre_coverage(session=session)
     thin_genres = [g for g, n in coverage.items() if n < _THIN_THRESHOLD]
 
     # --- Determine which UserContext fields are populated -------------------
@@ -78,16 +82,10 @@ async def suggest(
         thin_genres=thin_genres,
         coverage=coverage,
         active_fields=active_fields,
+        preferred_tone=preferred_tone,
     )
 
-    system = (
-        "You are the Librarian for an AI comedian. "
-        "Return a JSON object with key 'angles', a list of objects each "
-        "with keys: genre, topic, rationale, freshness_score (0.0-1.0). "
-        "Thin genres should have higher freshness_score. "
-        "Return at least 3 angles. "
-        "humor_avoid fields are HARD CONSTRAINTS: never suggest those styles."
-    )
+    system = _SYSTEM_PROMPT
 
     model_t0 = time.monotonic()
     response = await _client.chat.completions.create(
@@ -108,6 +106,7 @@ async def suggest(
             topic=a["topic"],
             rationale=a["rationale"],
             freshness_score=float(a.get("freshness_score", 0.5)),
+            tone_level=int(a.get("tone_level", preferred_tone)),
         )
         for a in raw.get("angles", [])
     ]
@@ -127,6 +126,7 @@ async def suggest(
         high_scorer_count=len(high_rows),
         thin_genres=thin_genres,
         angle_count=len(angles),
+        preferred_tone=preferred_tone,
     )
 
     await record_step(
@@ -135,7 +135,7 @@ async def suggest(
         kind="suggestion",
         actor="librarian.suggest",
         model=SUGGEST_MODEL,
-        prompt_ref="librarian/suggest_v1",
+        prompt_ref="prompts/suggest_user_v1.txt",
         inputs={
             "user_context": ctx.model_dump(mode="json", exclude_none=True),
             "active_context_fields": active_fields,
@@ -143,6 +143,7 @@ async def suggest(
             "taxonomy_snapshot_version": request.taxonomy_snapshot_version,
             "high_scorer_count": len(high_rows),
             "thin_genres": thin_genres,
+            "preferred_tone_level": preferred_tone,
         },
         output={"angles": [a.model_dump() for a in angles]},
         rationale=rationale,
@@ -192,6 +193,7 @@ def _build_prompt(
     thin_genres: list[str],
     coverage: dict[str, int],
     active_fields: list[str],
+    preferred_tone: int,
 ) -> str:
     ctx = user_context
     ctx_lines: list[str] = []
@@ -219,9 +221,18 @@ def _build_prompt(
     if not ctx_lines:
         ctx_lines.append("  (no listener context provided — use general audience defaults)")
 
+    _TONE_LABELS = {1: "STANDARD (level 1)", 2: "EDGIER (level 2)", 3: "DARKEST (level 3)"}
+    tone_note = (
+        f"Preferred tone level for this listener: {_TONE_LABELS[preferred_tone]}. "
+        "Set tone_level on each returned angle to this value unless a specific "
+        "angle topic genuinely warrants a different level."
+    )
+
     lines = [
         "=== Listener context ===",
         *ctx_lines,
+        "",
+        tone_note,
         "",
         f"Already delivered genres this session: {', '.join(listener_history) or 'none'}",
         f"Thin genres (< {_THIN_THRESHOLD} jokes, prefer these): {', '.join(thin_genres) or 'none'}",
@@ -238,11 +249,10 @@ def _build_prompt(
         lines.append(f"  {genre}: {n}")
     lines += [
         "",
-        "Suggest angles that are fresh, relevant, and varied. "
-        "Prefer thin genres. Avoid genres already delivered this session. "
-        "Each rationale must name the listener trait it responds to.",
+        "For each suggested angle, include a 'tone_level' field (integer 1–3) "
+        "matching the recommended tone level for this listener.",
     ]
-    return "\n".join(lines)
+    return _USER_TEMPLATE.format(body="\n".join(lines)).strip()
 
 
 def _build_rationale(
@@ -251,11 +261,13 @@ def _build_rationale(
     high_scorer_count: int,
     thin_genres: list[str],
     angle_count: int,
+    preferred_tone: int,
 ) -> str:
     """Human-readable rationale for the trace step.
 
-    Must name which UserContext fields drove the decision so the trace is
-    auditable.  User fit is the second-highest graded criterion.
+    Must name which UserContext fields drove the decision and what tone level
+    was steered toward so the trace is auditable.
+    User fit is the second-highest graded criterion.
     """
     if active_fields:
         field_str = ", ".join(active_fields)
@@ -265,6 +277,7 @@ def _build_rationale(
 
     return (
         f"{ctx_note} "
+        f"Steered toward tone_level={preferred_tone} based on session score history. "
         f"Queried {high_scorer_count} high-scoring jokes and identified "
         f"{len(thin_genres)} thin genre(s) ({', '.join(thin_genres) or 'none'}). "
         f"Model returned {angle_count} ranked angle(s)."
