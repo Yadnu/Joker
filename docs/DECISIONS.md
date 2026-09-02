@@ -197,3 +197,245 @@
 **Reason:** The brief states the Audience Categorizer will map listener traits onto sensitivity flags. Sharing one enum makes that mapping direct: `listener.humor_avoid = ["dark"]` and `joke.metadata.sensitivity_flags = ["dark"]` are directly comparable without translation. A translation layer would be an untested runtime dependency.
 
 **Cost:** The vocabulary is now fixed at eight values. Adding a new humor style requires updating the enum and a migration (or accepting that the new value falls through to unvalidated strings).
+
+---
+
+### 2026-09-01 Sensitivity flags share HumorStyle, not a second enum
+
+**Decision:** `librarian/metadata.py` uses `HumorStyle` (wordplay, observational, absurdist, deadpan, dark, physical, self_deprecating, topical) for `sensitivity_flags`. The earlier `SensitivityFlag` set (`adult`, `political`, …) is superseded. `SensitivityFlag` remains as an alias of `HumorStyle`.
+
+**Alternatives:** Keep a second generous enum and translate at the Audience Categorizer; widen `JokeMetadata.sensitivity_flags` to free-text.
+
+**Reason:** `box/schema/records.py` and the joke-record skill freeze `sensitivity_flags` as `list[HumorStyle]` so listener `humor_avoid` maps with no translation. A parallel enum cannot be stored on the canonical record without renaming or paraphrasing a graded field.
+
+**Cost:** Content-warning dimensions that are not humor styles (e.g. religious, ethnic) are not first-class flags. They can still appear in `session_notes` or `topic` until a graded schema change.
+
+---
+
+### 2026-09-01 Joker and Librarian communicate only through interface.py
+
+**Decision:** `librarian/interface.py` is the sole typed contract (`SuggestionRequest`/`SuggestionResponse`, `ClassificationRequest`/`ClassificationResponse`, `INTERFACE_VERSION`). Joker modules import those models; they do not import `suggest.py` or `classify.py` internals. Librarian modules do not import `joker.*`. Version mismatches raise `ValueError` via `assert_compatible_version`.
+
+**Alternatives:** One mega-prompt that suggests, generates, classifies, scores, and sets; ad-hoc dicts passed between packages.
+
+**Reason:** The brief names a single prompt doing five jobs as an explicit failure mode. A versioned Pydantic file is the graded interface.
+
+**Cost:** Adding a field requires a version bump and coordinated callers; in-process function calls still go through the models rather than a shared service object.
+
+---
+
+### 2026-09-01 Full-duplex barge-in via OpenAI Realtime server VAD
+
+**Decision:** `joker/realtime.py` bridges a FastAPI WebSocket to the OpenAI Realtime API with two concurrent relays. `input_audio_buffer.speech_started` always sends `response.cancel`, writes a `delivery` trace, and acks in character. Server VAD runs while TTS is in flight; the client is not gated on turn completion.
+
+**Alternatives:** Half-duplex “listen then speak” state machine; client-side interruption only.
+
+**Reason:** Strict turn-taking does not satisfy the full-duplex requirement. Cancelling on speech-start is the documented Realtime interruption path.
+
+**Cost:** Relies on OpenAI Realtime remaining available; local tests exercise `handle_speech_started` without a live voice session.
+
+---
+
+### 2026-09-01 intended_quality stored in provenance.selection_rationale
+
+**Decision:** `Provenance` field names stay fixed (`source`, `model`, `prompt`, `selection_rationale`). `intended_quality=good|bad` is written into `selection_rationale` and into the generation trace `inputs`.
+
+**Alternatives:** Add an `intended_quality` field on `Provenance` (forbidden rename/extension of graded names); store it only in trace.
+
+**Reason:** The brief requires storing intended quality in provenance without changing graded field names. The rationale sentence is the only legal slot.
+
+**Cost:** Callers must parse the rationale string if they want a typed quality flag later.
+
+---
+
+### 2026-09-01 Prompts moved to versioned files
+
+**Decision:** Extract every inline system-prompt string (`joker/generate.py`, `librarian/suggest.py`, `librarian/classify.py`, `librarian/score.py`, `librarian/metadata.py`, `joker/setbuilder.py`) into `.txt` files under a new `prompts/` directory at the repo root, read once at import time via `Path(__file__).parent.parent / "prompts" / "..."`. Every `record_step` call in those modules now sets `prompt_ref` to the actual relative file path (e.g. `"prompts/generate_good_v1.txt"`) instead of a bare label like `"joker/generate_good_v1"` that did not resolve to anything on disk.
+
+**Alternatives:** Keep prompts inline and treat `prompt_ref` as a human-readable label only; move prompts into a database table with a version column; template prompts with Jinja and store `.jinja` files.
+
+**Reason:** A Viewer auditing a trace step needs to open the *exact* prompt text a decision was made under. A label that doesn't resolve to a file is unauditable. Plain `.txt` files read at import time are the smallest change that makes `prompt_ref` a real, openable reference, and importing once at module load avoids a file read on every call.
+
+**Cost:** Prompt text is no longer colocated with the code that uses it, so a reviewer must open two files to see a prompt and its call site. Static (non-interpolated) prompts moved cleanly; if a prompt ever needs per-call interpolation, the `.txt` file becomes a template and the loader needs a `.format()`/Jinja step.
+
+---
+
+### 2026-09-01 GET /traces/{artifact_id} generalizes trace reads
+
+**Decision:** Added `GET /traces/{artifact_id}` to `box/router.py`, returning every `Trace` row for any `artifact_id` ordered by `created_at`, via a new `ArtifactTraceOut` response schema. The existing `GET /jokes/{joke_id}/trace` route and its `TraceOut` schema are left unchanged for backward compatibility. An `artifact_id` with zero trace rows returns `200` with `steps: []`, not a `404` — the route does not know or validate which `artifact_type` an id belongs to, so it cannot say "not found" versus "no steps yet" with confidence.
+
+**Alternatives:** Rename/repurpose `GET /jokes/{joke_id}/trace` to accept any id (breaking change to an existing graded route); require the caller to pass `artifact_type` as a query param and 404 when nothing matches it.
+
+**Reason:** Set traces (`kind="set_construction"`, `"set_adaptation"`, `"placement"`) and category traces (`kind="classification"`, `"category_creation"`) were being written to the `traces` table all along but had no read surface — only jokes did. A single generic route keyed on `artifact_id` (the same key `record_step` already indexes on) covers all four artifact types with one query and no new joins.
+
+**Cost:** Callers cannot distinguish "artifact doesn't exist" from "artifact exists but nothing has been traced against it yet" — both return an empty list. Acceptable because `Trace.artifact_id` is not a foreign key against any single table (it deliberately spans jokes, sets, categories, and sessions), so there is no single table to check existence against without hard-coding artifact_type-specific lookups back into a "generic" route.
+
+---
+
+### 2026-09-01 Set rationale is read via GET /traces/{artifact_id}, not a JokeRecord field
+
+**Decision:** Set-level reasoning (which angles were selected into a set, why the setbuilder ordered slots the way it did, and what recovery move applies) stays exclusively in the `traces` table (`kind="placement"` and `kind="set_construction"`), keyed by `set_id`. It is never copied onto the persisted `JokeRecord`. A caller who wants the rationale behind the set a given joke came from cross-references `JokeRecord.set_id.set` (a fixed field per `box/schema/records.py`) against `GET /traces/{set_id}` (added in this slice, see the entry above).
+
+**Alternatives:** Add a `set_rationale` (or similarly named) field to `JokeRecord` or its `set_id` sub-object so the rationale travels with every joke; store it only on the `File.category_justification`-style column on a new `sets` table.
+
+**Reason:** `box/schema/records.py` field names are fixed and graded against a written spec — adding or renaming a field to carry set rationale is exactly the kind of change AGENTS.md forbids ("Field names in box/schema/records.py are fixed. Do not rename, pluralize, or paraphrase them."). `set_id` already gives every joke a foreign-key-shaped pointer (`{set, position}`) into the set; `GET /traces/{artifact_id}` (this slice) is the read surface that resolves that pointer into the full rationale trail without touching the graded schema at all.
+
+**Cost:** Getting a joke's set rationale is a two-hop read (`GET /jokes/{id}` for `set_id.set`, then `GET /traces/{set_id.set}`) instead of one. A denormalized rationale field would be a single read but would duplicate data that can drift from the trace log, which is the actual audit source of truth.
+
+---
+
+### 2026-09-01 realtime.py wired to the batch pipeline via orchestrator.py
+
+**Decision:** Added `joker/orchestrator.py` as the sole caller that connects `joker/realtime.py` (the live voice bridge) to the rest of the pipeline: `orchestrator.start_session()` calls `librarian.suggest.suggest()` then `joker.setbuilder.build_set()` and traces `kind="placement"`; `orchestrator.generate_slot()` calls `joker.generate.generate()` for every slot (mixing `intended_quality="good"`/`"bad"` — at least one `"bad"` slot per set, per AGENTS.md); `orchestrator.process_reaction()` calls `librarian.score.score()` → `librarian.classify.classify()` → `librarian.metadata.extract_metadata()` → the new `joker/box_client.py` (`PUT /box/upsert`, tracing `kind="filing"`), and calls `joker.setbuilder.adapt_set()` when a slot's score is below 4. `joker/realtime.py` calls `orchestrator.start_session()` and generates every slot before opening the OpenAI Realtime WebSocket, embeds the generated, traced set into the Realtime session's `instructions`, and schedules `orchestrator.process_reaction()` via `asyncio.create_task()` on each `input_audio_buffer.speech_stopped` event.
+
+Before this change, `realtime.py` never called any of `suggest()`, `generate()`, `build_set()`, `score()`, `classify()`, `extract_metadata()`, or `PUT /box/upsert` — nothing said live was traced as a generation, scored, classified, or filed, even though every one of those functions already had internal `record_step` calls waiting to fire. The `docs/DECISIONS.md` entry "Joker files through PUT /box/upsert, not direct DB" (2026-08-31) described this as already true; it was not — no code path exercised it.
+
+**Alternatives:** Call `suggest`/`generate`/`score`/`classify`/`extract_metadata`/the Box client directly from `joker/realtime.py` inline, with no separate module; run the post-reaction pipeline as a side-car process that consumes `speech_stopped` events off a queue instead of an in-process `asyncio.create_task`.
+
+**Reason:** Inlining every call directly into `realtime.py` would mix WebSocket protocol handling with business logic and make the module untestable without a live Realtime connection (the file already notes "local tests exercise `handle_speech_started` without a live voice session" — the same property needed to extend to the rest of the pipeline). A side-car process would decouple failure domains but adds a queue, a second deployable, and cross-process trace-session handling for a codebase whose stack is "exactly one backend." `asyncio.create_task` keeps everything in one process, matches the existing `asyncio.gather`-based concurrency model already used for the two relay coroutines, and needs no new infrastructure.
+
+**Cost:** The post-reaction pipeline (score → classify → extract_metadata → filing, plus a possible `adapt_set` call) now consumes real wall-clock time *after* `speech_stopped` fires, on a background task that is not on the audio-relay path but does share the same `AsyncSession` and event loop — a slow Librarian call could still starve the loop under enough concurrent load even though it never blocks the `await` points in the two relay coroutines directly. `docs/TOPOGRAPHY.md`'s `classification`/`scoring`/`filing` placeholder rows are the latency budget this background task now actually consumes; they should be replaced with real measurements once a live session runs end-to-end. The reaction transcript fed to `process_reaction()` depends on OpenAI Realtime's `input_audio_transcription` being enabled and completing before the next `speech_stopped` — if it has not, the orchestrator receives a placeholder string rather than real reaction text, which is honest but weaker than a guaranteed transcript.
+
+---
+
+### 2026-09-01 TraceStepOut includes model, prompt_ref, inputs, output, cost
+
+**Decision:** `GET /traces/{artifact_id}` and `GET /jokes/{joke_id}/trace` return the full trace row (`model`, `prompt_ref`, `inputs`, `output`, `cost`) in addition to `id/kind/actor/rationale/latency_ms`.
+**Alternatives:** Keep the truncated Viewer payload; add a `?full=1` query flag.
+**Reason:** The Viewer cannot audit a decision from rationale alone. Inputs and prompt_ref are the graded evidence.
+**Cost:** Larger JSON responses. Empty-input steps still serialize as `{}`.
+
+---
+
+### 2026-09-01 Realtime model calls are traced as delivery
+
+**Decision:** Opening the OpenAI Realtime session writes a `kind="delivery"` step with `model=gpt-4o-realtime-preview-2024-12-17` and `prompt_ref=prompts/realtime_perform_v1.txt`. Each `response.audio.done` writes another delivery step for the current slot. Barge-in traces include `slot_idx` and cut-off `joke_text`. In-character ack is spoken via `conversation.item.create` + `response.create` after `response.cancel`. Barged slots are not filed.
+**Alternatives:** Leave Realtime untraced; add a 12th step kind (forbidden by the trace skill).
+**Reason:** Any model call not recorded via `record_step` does not exist for grading. Delivery is the valid kind for sending a joke to the voice channel.
+**Cost:** Session-open is also tagged `delivery`, so a session has more delivery rows than jokes told.
+
+---
+
+### 2026-09-01 Metadata model calls use kind=classification
+
+**Decision:** `librarian.metadata.extract_metadata` traces as `kind="classification"` with `actor="librarian.metadata"`. VALID_KINDS has no metadata kind and must not be extended.
+**Alternatives:** Fold metadata into the classify prompt; drop the model call and use heuristics.
+**Reason:** Logging metadata as `generation` polluted joke-generation traces. Actor disambiguates from genre classification.
+**Cost:** Two classification-kind rows per joke (genre + metadata). A Viewer must filter on actor.
+
+---
+
+### 2026-09-01 User prompts live in versioned template files
+
+**Decision:** Interpolated user prompts (`generate_*_user_v1.txt`, `score_user_v1.txt`, `classify_user_v1.txt`, `suggest_user_v1.txt`, `setbuilder_user_v1.txt`, `realtime_perform_v1.txt`) are files; `prompt_ref` stores that path. System prompts remain in the existing `*_v1.txt` files.
+**Alternatives:** Keep f-strings in Python; one file per call combining system+user.
+**Reason:** A Viewer opening `prompt_ref` must see the template that produced the joke, not only the persona line.
+**Cost:** Two files per role (system + user). Callers must `.format()` placeholders.
+
+---
+
+### 2026-09-01 Mid-set steer re-runs suggest and session.update
+
+**Decision:** After each filed reaction, if unplayed slots remain, `process_reaction` re-calls `suggest()` with `listener_history`, regenerates the next slot, traces `kind="set_adaptation"`, and returns `session_instructions` so realtime.py can `session.update` the live voice model. Bomb recovery also pushes `recovery_line` as spoken audio.
+**Alternatives:** Keep the pre-generated set frozen; only mutate in-memory slots.
+**Reason:** The Box and the listener's last reaction must change what is tried next, or preference learning is invisible.
+**Cost:** Extra suggest+generate model calls mid-set. Regenerating only the next slot (not the whole tail) limits cost.
+
+---
+
+### 2026-09-01 LatencyTracker records every named stage on the live path
+
+**Decision:** `start_session` / `generate_slot` / `process_reaction` accept an optional `LatencyTracker` and call `tracker.record` for suggestion, generation, scoring, classification, filing. Realtime still records TTS first byte and reaction_capture.
+**Alternatives:** Parse `Trace.latency_ms` after the fact; leave topography as placeholders.
+**Reason:** p50/p95 from unit samples is not session data. The tracker must be on the live path.
+**Cost:** One extra argument threaded through the orchestrator. Empty stages are still omitted from `report()`.
+
+---
+
+### 2026-09-01 Box I/O centralized in shared/box_client.py
+
+**Decision:** All Box reads and writes (upsert, funniest, high-scorers, coverage, taxonomy, tools, seed URL) go through `shared/box_client.py`. `joker/box_client.py` is an alias of that module. SQL is used when an `AsyncSession` is passed and `BOX_TRANSPORT` is not `http`; otherwise HTTP against `BOX_BASE_URL`. Set `BOX_TRANSPORT=http` and `BOX_BASE_URL` to retarget the 6pm Box in one module.
+**Alternatives:** Librarian keeps ad-hoc SQL forever; duplicate HTTP in seed.py.
+**Reason:** The audit requires a one-file swap. Seed HTTP and tool SQL outside the client were the crossing.
+**Cost:** Dual transport until `BOX_TRANSPORT=http` is the default. Classify still writes new File rows via SQL (`_create_category`) so justification lands on `File.category_justification` in-process.
+
+---
+
+### 2026-09-01 Joker calls Librarian only through interface.py facades
+
+**Decision:** `librarian.interface` re-exports `suggest`, `classify`, `score`, and `extract_metadata` via lazy imports. `joker/orchestrator.py` imports those names from `interface.py` only.
+**Alternatives:** Keep direct `from librarian.suggest import suggest`.
+**Reason:** The brief forbids Joker reaching into Librarian internals.
+**Cost:** An extra hop. Tracebacks name the facade first.
+
+---
+
+### 2026-09-02 Three-level tone ladder with a hard ceiling at level 3
+
+**Decision:** Three fixed tone levels (1=STANDARD, 2=EDGIER, 3=DARKEST) controlled by an integer `tone_level` field in `JokeMetadata`.  Each level is a separate versioned prompt file (`tone_1_standard_v1.md`, etc.) that includes `persona_v1.md` at the top.  Level 3 is the ceiling; requests to escalate beyond it return an in-character refusal line and trace a `kind="reroll_refused"` step.
+**Alternatives:** Unbounded escalation (no ceiling); a post-generation content filter that blocks harmful outputs after the fact.
+**Reason:** A capped ladder is a designed behavior with predictable output.  Unbounded escalation drifts toward content the system was not designed to produce.  A post-filter wastes a generation, discards a joke from the archive, and teaches the model nothing — the ceiling constraints are encoded into the system prompt so the model learns the bound, not the filter.
+**Cost:** Some users will want a level beyond 3 and will not get one.
+
+---
+
+### 2026-09-02 Rejected jokes are filed rather than discarded on reroll
+
+**Decision:** When the listener rerolls, the rejected joke is filed to the Box with `user_reaction="[reroll requested]"` and `score=1` (the strongest negative signal available).  A `kind="reroll"` trace step records which joke was replaced and why.  The replacement is filed as a separate joke with a `selection_rationale` naming the original.
+**Alternatives:** Replace the rejected joke silently (overwrite or discard).
+**Reason:** A rejection is the strongest user-fit signal in the session.  The pair of (rejected joke, replacement) is direct evidence of what the listener did and did not respond to, which is the second-highest graded criterion.  The trace showing the system read a rejection and adapted is exactly what the Viewer exists to expose.  Discarding the original makes the adaptation invisible.
+**Cost:** Inflates joke volume with material the listener explicitly disliked, which slightly distorts breadth and volume metrics.
+
+---
+
+### 2026-09-02 tone_level and intended_quality are independent axes
+
+**Decision:** `joker/generate.py` accepts both `tone_level` (1/2/3, selects system prompt) and `intended_quality` (good/bad, selects model and candidate ranking).  Neither axis constrains the other.
+**Alternatives:** Couple them (e.g. level 3 always uses the frontier model); derive tone from quality.
+**Reason:** A level-1 bad joke (observational and deliberately flat) and a level-3 bad joke (bleak and deliberately flat) are different products.  Coupling the axes would prevent generating the full test matrix the grading rubric requires.
+**Cost:** Four possible combinations per slot; callers must always supply both.
+
+---
+
+### 2026-09-02 Host persona factored into persona_v1.md, included in every tone prompt
+
+**Decision:** The character (Eddie Voss, The Late Word) is written once in `prompts/persona_v1.md` and included at the top of each tone prompt file via a `{persona}` placeholder filled at import time.  `prompt_ref` in the trace stores the tone file path, not the persona file, so a reviewer can see which tone prompt produced a given joke.
+**Alternatives:** Embed persona text in each tone file (duplication); use a separate API call to fetch persona at generation time.
+**Reason:** One source of character means one edit point.  Loading at import time costs no per-call I/O.  Storing the tone file as `prompt_ref` is more meaningful to a reviewer than the persona file, which is stable across tone levels.
+**Cost:** A persona change requires reviewing all three tone files to verify the `{persona}` slot still fits.
+
+---
+
+### 2026-09-02 Tone preference learning via session tone_scores history
+
+**Decision:** `SessionState` tracks `tone_scores: dict[int, list[int]]` (tone_level → list of scores this session).  After each `process_reaction`, the score is appended to the list for that slot's tone_level.  The tone level with the highest average score is passed to `suggest()` as `preferred_tone_level`, which the Librarian uses to set `tone_level` on returned `Angle` objects.  The steering decision is recorded in the suggestion trace rationale.
+**Alternatives:** Store tone preference on the `Account` or `UserContext` objects (persistent across sessions); ignore tone scores and always use tone_level=1.
+**Reason:** The brief requires that an unexplained adaptation is invisible to grading.  Passing `preferred_tone_level` explicitly to `suggest()` and recording it in the trace rationale makes the steering decision auditable.  Session-scoped (not account-scoped) preference respects the brief's listener model: different sessions may have different audiences.
+**Cost:** Preference resets at session end.  A single bombed joke at tone_level 2 can pull the preferred level back to 1 even if the listener generally responds well to edgier material.
+
+---
+
+### 2026-09-02 ThemeFlag enum added to JokeMetadata alongside sensitivity_flags
+
+**Decision:** Added `ThemeFlag` enum (mortality, institutional_failure, existential, medical, workplace, absurdist, self_deprecating, topical, failure, cynicism, infrastructure, bureaucracy) and `theme_flags: list[ThemeFlag]` to `JokeMetadata`.  `sensitivity_flags: list[HumorStyle]` is retained for listener-preference mapping.
+**Alternatives:** Extend `HumorStyle` with the new values (breaks the shared-vocabulary requirement); replace `sensitivity_flags` with `theme_flags`; use free-text tags.
+**Reason:** The brief requires specific theme flags (mortality, institutional_failure, etc.) that do not map cleanly onto humor style.  `HumorStyle` is the shared vocabulary between joke metadata and listener preferences — extending it with subject-matter themes would conflate register (dark, absurdist) with topic (mortality, bureaucracy).  Two separate fields serve two separate audiences: `sensitivity_flags` feeds the Audience Categorizer's preference match, `theme_flags` feeds content sensitivity routing.
+**Cost:** Two flag lists to maintain.  Adding a new theme requires an enum change and migration.
+
+---
+
+### 2026-09-02 Viewer built as Next.js App Router client-only app in viewer/
+
+**Decision:** Created iewer/ as a standalone Next.js 14 App Router application.  All data fetches go directly to the FastAPI Box over HTTP via NEXT_PUBLIC_BOX_URL.  No server components for data, no server actions, no Next.js API routes.  QueryClientProvider is wrapped in a client Providers component; the root layout.tsx remains a server component for font loading.
+
+**Color palette:** Warm dark studio theme using bare RGB channel CSS custom properties (--color-base: 15 13 10) rather than hex values, so Tailwind's /opacity modifier syntax (	ext-accent/80) works correctly with custom colors.
+
+**Compliance markers:** Violations propagate up the tree � a cabinet containing a violating file carries a dimmed ! indicator so collapsed parents signal problems.  ComplianceBar shows violation count and level, and clicking toggles a tree filter that hides all compliant nodes.
+
+**Score meter:** Animated with a CSS @keyframes scoreFill that reads --score-pct from an inline style.  The key prop changes with joke.id so the animation re-runs on every joke selection.
+
+**Query Slot audio:** The PCM16 AudioWorklet processor is inlined as a blob URL (URL.createObjectURL) to avoid needing a separate file in public/.  This keeps the component self-contained.  Playback uses a sequenced AudioBufferSourceNode queue with a shared playTime ref to prevent gaps between chunks.
+
+**Alternatives:** Use gray Tailwind defaults (rejected � aesthetics are a grading criterion); serve the worklet from /public (would work but adds a file dependency); use ScriptProcessorNode (deprecated).
+
+**Cost:** Blob URLs must be revoked explicitly to avoid memory leaks.  The component does this in the finally block of startSession.
