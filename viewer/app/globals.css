@@ -1,0 +1,177 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Studio palette — warm darks, single amber accent.
+   Colors are defined as bare RGB channels so Tailwind's opacity modifier
+   syntax (e.g. text-accent/80, bg-violation/10) works correctly.
+   --------------------------------------------------------------------------- */
+:root {
+  --color-base:          15 13 10;     /* #0f0d0a */
+  --color-surface:       24 21 16;     /* #181510 */
+  --color-raised:        34 30 22;     /* #221e16 */
+  --color-edge:          48 41 30;     /* #30291e */
+  --color-hi:            240 232 213;  /* #f0e8d5 */
+  --color-mid:           168 157 134;  /* #a89d86 */
+  --color-lo:            107 96 80;    /* #6b6050 */
+  --color-accent:        245 158 11;   /* #f59e0b */
+  --color-accent-dim:    146 64 14;    /* #92400e */
+  --color-accent-glow:   245 158 11;   /* same as accent — used at low opacity */
+  --color-violation:     224 74 42;    /* #e04a2a */
+  --color-live:          245 158 11;   /* #f59e0b */
+}
+
+/* ---------------------------------------------------------------------------
+   Base resets
+   --------------------------------------------------------------------------- */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--color-base);
+  color: var(--color-hi);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Noise grain overlay — faint broadcast texture */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.07'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  pointer-events: none;
+  z-index: 9998;
+  mix-blend-mode: overlay;
+  opacity: 0.5;
+}
+
+/* Warm radial vignette */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    rgba(245, 158, 11, 0.04) 0%,
+    transparent 60%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Scrollbar — thin, warm
+   --------------------------------------------------------------------------- */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-base);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-edge);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-lo);
+}
+
+/* ---------------------------------------------------------------------------
+   Score meter animation
+   --------------------------------------------------------------------------- */
+@keyframes scoreFill {
+  0%   { width: 0%;                opacity: 0.5; }
+  100% { width: var(--score-pct);  opacity: 1;   }
+}
+
+.score-bar {
+  animation: scoreFill 1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* ---------------------------------------------------------------------------
+   ON AIR pulse
+   --------------------------------------------------------------------------- */
+@keyframes onAir {
+  0%, 100% { opacity: 1;   box-shadow: 0 0 10px rgba(220, 38, 38, 0.9); }
+  50%       { opacity: 0.5; box-shadow: 0 0 4px rgba(220, 38, 38, 0.3);  }
+}
+
+.on-air {
+  animation: onAir 1.4s ease-in-out infinite;
+}
+
+/* ---------------------------------------------------------------------------
+   Utility classes
+   --------------------------------------------------------------------------- */
+@layer components {
+  /* Monospace data field */
+  .data-field {
+    @apply font-mono text-xs text-mid;
+  }
+  .data-label {
+    @apply font-mono text-[10px] uppercase tracking-widest text-lo;
+  }
+
+  /* Section header */
+  .section-label {
+    @apply font-mono text-[10px] uppercase tracking-widest text-lo mb-2;
+  }
+
+  /* Pill tag */
+  .tag {
+    @apply inline-block px-2 py-0.5 text-[10px] font-mono rounded border border-edge text-mid;
+  }
+  .tag-accent {
+    @apply tag border-accent/30 text-accent/80;
+  }
+  .tag-violation {
+    @apply tag border-violation/40 text-violation/90;
+  }
+
+  /* Button base */
+  .btn {
+    @apply px-3 py-1 text-xs font-mono rounded border border-edge text-mid 
+           hover:border-accent/40 hover:text-hi transition-colors duration-150 
+           disabled:opacity-30 disabled:cursor-not-allowed;
+  }
+  .btn-accent {
+    @apply btn border-accent/40 text-accent hover:border-accent hover:bg-accent/10;
+  }
+  .btn-ghost {
+    @apply btn border-transparent hover:border-edge;
+  }
+
+  /* Card surface */
+  .card {
+    @apply bg-surface border border-edge rounded-lg;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,200,80,0.05);
+  }
+  .card-raised {
+    @apply bg-raised border border-edge rounded-lg;
+  }
+
+  /* Highlight row */
+  .tree-node {
+    @apply flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono cursor-pointer
+           text-mid hover:bg-raised hover:text-hi transition-colors duration-100;
+  }
+  .tree-node-active {
+    @apply bg-raised text-hi border-l-2 border-accent;
+  }
+
+  /* Accent left-rule (used in Trace) */
+  .trace-rule {
+    @apply border-l-2 pl-3;
+  }
+}
