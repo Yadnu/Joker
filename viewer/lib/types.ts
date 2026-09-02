@@ -225,3 +225,94 @@ export interface SelectionPath {
   drawer: string
   file: string
 }
+
+// ---------------------------------------------------------------------------
+// WebSocket event types for the live show (/ route).
+// These mirror the Python event models emitted by joker/realtime.py.
+// One shared vocabulary — no ad-hoc string matching on the client.
+// ---------------------------------------------------------------------------
+
+/** Fatal provider error (quota, disconnect). */
+export interface ShowErrorEvent {
+  type: 'error'
+  message: string
+}
+export interface TranscriptDeltaEvent {
+  type: 'transcript_delta'
+  speaker: 'host' | 'user'
+  delta: string
+}
+
+/** One complete turn of prompt_responses as delivered (full text). */
+export interface JokeTurnEvent {
+  type: 'joke_turn'
+  speaker: 'host' | 'user'
+  content: string
+}
+
+/** The host's line was cut mid-word by a user barge-in. */
+export interface BargeInEvent {
+  type: 'barge_in'
+  /** Text that was being spoken when the interruption occurred. */
+  cut_text: string
+  /** How many milliseconds into the delivery the barge-in landed. */
+  at_ms: number
+}
+
+/** Kinds of pipeline steps the Librarian reports on. */
+export type LibrarianStepKind =
+  | 'suggestion'
+  | 'generation'
+  | 'delivery'
+  | 'reaction'
+  | 'score'
+  | 'classify'
+  | 'filed'
+
+/** One completed pipeline step — one card in the Critic's feed. */
+export interface LibrarianStepEvent {
+  type: 'librarian_step'
+  kind: LibrarianStepKind
+  actor: string
+  model: string | null
+  latency_ms: number
+  rationale: string
+  payload: Record<string, unknown>
+  joke_id: string | null
+}
+
+/** Current set position — which bit is up and how many total. */
+export interface SetPositionEvent {
+  type: 'set_position'
+  current: number
+  total: number
+}
+
+export type SessionStateName = 'connected' | 'listening' | 'speaking' | 'idle'
+
+/** Session-level state change broadcast by the server. */
+export interface SessionStateEvent {
+  type: 'session_state'
+  state: SessionStateName
+}
+
+/**
+ * Output audio amplitude from the host's TTS stream.
+ * Drives the host figure's mouth animation in real time.
+ */
+export interface AudioAmplitudeEvent {
+  type: 'audio_amplitude'
+  /** Normalised RMS amplitude, 0.0 (silent) to 1.0 (peak). */
+  amplitude: number
+}
+
+/** Discriminated union of all typed events the show page handles. */
+export type ShowWsEvent =
+  | TranscriptDeltaEvent
+  | JokeTurnEvent
+  | BargeInEvent
+  | LibrarianStepEvent
+  | SetPositionEvent
+  | SessionStateEvent
+  | AudioAmplitudeEvent
+  | ShowErrorEvent
