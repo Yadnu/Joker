@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { BOX_URL } from '@/lib/api'
+import { fetchJoke, BOX_URL } from '@/lib/api'
 import type { JokeRecord, ExportData } from '@/lib/types'
 
 // ---------------------------------------------------------------------------
@@ -136,74 +136,99 @@ interface Props {
 
 export default function Export({ selectedJokeId, selectedJoke: _ }: Props) {
   const qc = useQueryClient()
+  const [error, setError] = useState<string | null>(null)
+
+  const loadCurrentJoke = async (): Promise<JokeRecord> => {
+    if (!selectedJokeId) throw new Error('No joke selected.')
+    const cached = qc.getQueryData<JokeRecord>(['joke', selectedJokeId])
+    if (cached) return cached
+    return fetchJoke(selectedJokeId)
+  }
 
   // Current joke — JSON
   const handleCurrentJson = async () => {
-    if (!selectedJokeId) return
-    const joke = qc.getQueryData<JokeRecord>(['joke', selectedJokeId])
-    if (!joke) return
+    setError(null)
+    const joke = await loadCurrentJoke()
     downloadBlob(
       JSON.stringify(joke, null, 2),
-      `joke-${selectedJokeId}.json`,
+      `joke-${joke.id}.json`,
       'application/json',
     )
   }
 
   // Current joke — CSV
   const handleCurrentCsv = async () => {
-    if (!selectedJokeId) return
-    const joke = qc.getQueryData<JokeRecord>(['joke', selectedJokeId])
-    if (!joke) return
+    setError(null)
+    const joke = await loadCurrentJoke()
     const row = jokeToFlatRow(joke)
-    downloadBlob(toCSV([row]), `joke-${selectedJokeId}.csv`, 'text/csv')
+    downloadBlob(toCSV([row]), `joke-${joke.id}.csv`, 'text/csv')
   }
 
   // Library — JSON
   const handleLibraryJson = async () => {
+    setError(null)
     const res = await fetch(`${BOX_URL}/export`)
+    if (!res.ok) throw new Error(`Library export failed: HTTP ${res.status}`)
     const data: ExportData = await res.json()
     downloadBlob(JSON.stringify(data, null, 2), 'jokebox-library.json', 'application/json')
   }
 
   // Library — CSV
   const handleLibraryCsv = async () => {
+    setError(null)
     const res = await fetch(`${BOX_URL}/export`)
+    if (!res.ok) throw new Error(`Library export failed: HTTP ${res.status}`)
     const data: ExportData = await res.json()
     const rows = flattenLibrary(data)
     downloadBlob(toCSV(rows), 'jokebox-library.csv', 'text/csv')
   }
 
+  const wrap = (fn: () => Promise<void>) => async () => {
+    try {
+      await fn()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Export failed.')
+    }
+  }
+
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="font-mono text-[9px] text-lo/50 uppercase tracking-wider mr-0.5">
-        Export
-      </span>
+    <div className="flex flex-col items-end gap-0.5">
+      <div className="flex items-center gap-1.5">
+        <span className="font-mono text-[9px] text-lo/50 uppercase tracking-wider mr-0.5">
+          Export
+        </span>
 
-      <ExportBtn
-        label="JSON"
-        title="Current joke as JSON"
-        disabled={!selectedJokeId}
-        onClick={handleCurrentJson}
-      />
-      <ExportBtn
-        label="CSV"
-        title="Current joke as CSV"
-        disabled={!selectedJokeId}
-        onClick={handleCurrentCsv}
-      />
+        <ExportBtn
+          label="JSON"
+          title="Current joke as JSON"
+          disabled={!selectedJokeId}
+          onClick={wrap(handleCurrentJson)}
+        />
+        <ExportBtn
+          label="CSV"
+          title="Current joke as CSV"
+          disabled={!selectedJokeId}
+          onClick={wrap(handleCurrentCsv)}
+        />
 
-      <span className="text-edge/60 text-xs select-none">|</span>
+        <span className="text-edge/60 text-xs select-none">|</span>
 
-      <ExportBtn
-        label="Lib JSON"
-        title="Whole library as JSON (fetched fresh from Box)"
-        onClick={handleLibraryJson}
-      />
-      <ExportBtn
-        label="Lib CSV"
-        title="Whole library as CSV (nested fields are JSON strings)"
-        onClick={handleLibraryCsv}
-      />
+        <ExportBtn
+          label="Lib JSON"
+          title="Whole library as JSON (fetched fresh from Box)"
+          onClick={wrap(handleLibraryJson)}
+        />
+        <ExportBtn
+          label="Lib CSV"
+          title="Whole library as CSV (nested fields are JSON strings)"
+          onClick={wrap(handleLibraryCsv)}
+        />
+      </div>
+      {error && (
+        <span className="font-mono text-[9px] text-violation/80 max-w-xs text-right">
+          {error}
+        </span>
+      )}
     </div>
   )
 }

@@ -45,7 +45,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from box.schema.models import Account, Cabinet, Drawer, File, Joke, Trace
-from box.schema.records import JokeRecord
+from box.schema.records import JokeMetadata, JokeRecord
 from box.schema.responses import (
     AccountCreateOut,
     AccountListOut,
@@ -311,12 +311,34 @@ async def get_box(session: AsyncSession = Depends(get_session)) -> TreeOut:
             for fil in (
                 await session.execute(select(File).where(File.drawer_id == drw.id))
             ).scalars().all():
-                joke_count = (
+                jokes = (
                     await session.execute(
-                        select(func.count()).select_from(Joke).where(Joke.file_id == fil.id)
+                        select(
+                            Joke.id,
+                            Joke.score,
+                            Joke.joke_text,
+                            Joke.category,
+                            Joke.provenance,
+                            Joke.set_id,
+                        ).where(Joke.file_id == fil.id)
                     )
-                ).scalar() or 0
-                files.append({"id": fil.id, "label": fil.label, "joke_count": joke_count})
+                ).all()
+                files.append({
+                    "id": fil.id,
+                    "label": fil.label,
+                    "joke_count": len(jokes),
+                    "jokes": [
+                        {
+                            "id": jid,
+                            "score": score,
+                            "joke_text": text,
+                            "category": cat,
+                            "source": (prov or {}).get("source", "") if isinstance(prov, dict) else "",
+                            "set": (sid or {}).get("set", "") if isinstance(sid, dict) else "",
+                        }
+                        for jid, score, text, cat, prov, sid in jokes
+                    ],
+                })
             drawers.append({"id": drw.id, "label": drw.label, "files": files})
         result.append({"id": cab.id, "label": cab.label, "drawers": drawers})
     return TreeOut.model_validate({"cabinets": result})
@@ -466,7 +488,17 @@ async def get_file(
         id=fil.id,
         label=fil.label,
         drawer_id=fil.drawer_id,
-        jokes=[{"id": j.id, "score": j.score} for j in jokes],
+        jokes=[
+            {
+                "id": j.id,
+                "score": j.score,
+                "joke_text": j.joke_text,
+                "category": j.category,
+                "source": (j.provenance or {}).get("source", "") if isinstance(j.provenance, dict) else "",
+                "set": (j.set_id or {}).get("set", "") if isinstance(j.set_id, dict) else "",
+            }
+            for j in jokes
+        ],
     )
 
 
@@ -521,6 +553,34 @@ async def get_joke(
     ).scalar_one_or_none()
     if joke is None:
         raise _level_error("joke", f"Joke '{joke_id}' not found.")
+    return JokeOut.model_validate(_joke_to_dict(joke))
+
+
+class JokeLandingIn(BaseModel):
+    user_reaction: str
+    score: int
+    category: str
+    metadata: JokeMetadata
+
+
+@router.put("/jokes/{joke_id}", response_model=JokeOut)
+async def update_joke_landing(
+    joke_id: str,
+    body: JokeLandingIn,
+    account: Account = Depends(require_account),
+    session: AsyncSession = Depends(get_session),
+) -> JokeOut:
+    """Overwrite landing fields on an existing joke. Path is not inferred or moved."""
+    joke = (
+        await session.execute(select(Joke).where(Joke.id == joke_id))
+    ).scalar_one_or_none()
+    if joke is None:
+        raise _level_error("joke", f"Joke '{joke_id}' not found.")
+    joke.user_reaction = body.user_reaction
+    joke.score = body.score
+    joke.category = body.category
+    joke.joke_metadata = body.metadata.model_dump(mode="json")
+    await session.commit()
     return JokeOut.model_validate(_joke_to_dict(joke))
 
 
@@ -779,8 +839,9 @@ async def _traces_for_joke(session: AsyncSession, joke: Joke) -> list[Trace]:
 
     Upsert mints a UUID; generation/scoring/delivery traces are written
     earlier against joke_{hex}. Classification is keyed to category:{label}.
-    Join those rows by matching joke_text so the Viewer panel is not empty
-    of the actual decision trail.
+    Set construction/placement/adaptation are keyed to set_id.set.
+    Session delivery/reaction rows store joke_text in inputs.
+    Join those so the Viewer panel can explain the joke.
     """
     gen_ids = (
         await session.execute(
@@ -793,12 +854,17 @@ async def _traces_for_joke(session: AsyncSession, joke: Joke) -> list[Trace]:
     input_ids = (
         await session.execute(
             select(Trace.artifact_id).where(
-                Trace.artifact_type == "joke",
+                Trace.artifact_type.in_(("joke", "session")),
                 Trace.inputs["joke_text"].as_string() == joke.joke_text,
             )
         )
     ).scalars().all()
     artifact_ids = {joke.id, *gen_ids, *input_ids}
+    set_key = None
+    if isinstance(joke.set_id, dict):
+        set_key = joke.set_id.get("set")
+    if set_key:
+        artifact_ids.add(str(set_key))
     cat_id = f"category:{joke.category}"
     traces = (
         await session.execute(

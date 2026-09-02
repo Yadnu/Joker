@@ -126,6 +126,25 @@ function CtxRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 function UserContextPanel({ uc }: { uc: UserContext }) {
+  const hasAny =
+    uc.age_band != null ||
+    !!uc.region ||
+    uc.occupation_field != null ||
+    uc.energy != null ||
+    uc.first_time != null ||
+    uc.humor_preferences.length > 0 ||
+    uc.humor_avoid.length > 0 ||
+    !!uc.session_notes
+
+  if (!hasAny) {
+    return (
+      <div className="card-raised p-3 font-mono text-xs text-lo/70">
+        Not collected for this session. Every field is optional; empty means the
+        Joker had no listener snapshot, not that the record is incomplete.
+      </div>
+    )
+  }
+
   return (
     <div className="card-raised p-3 space-y-1">
       <CtxRow label="Age band" value={uc.age_band?.replace('_', '–')} />
@@ -164,7 +183,9 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 // ---------------------------------------------------------------------------
 
 function Breadcrumb({ path, category }: { path: SelectionPath | null; category: string }) {
-  const parts = path ? [path.cabinet, path.drawer, path.file] : [category]
+  const parts = path
+    ? [path.cabinet, path.drawer, path.file]
+    : ['path unresolved', category]
   return (
     <div className="flex items-center gap-1 font-mono text-[10px] text-lo flex-wrap">
       <span className="text-lo/50">Archive</span>

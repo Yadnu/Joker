@@ -1,8 +1,6 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchFile } from '@/lib/api'
 import type {
   TreeData,
   TreeCabinet,
@@ -82,19 +80,27 @@ interface JokeRowProps {
 }
 
 function JokeRow({ joke, idx, selected, onSelect }: JokeRowProps) {
+  const preview = (joke.joke_text ?? '').replace(/\s+/g, ' ').trim()
   return (
     <button
       onClick={onSelect}
       className={[
-        'w-full flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-mono cursor-pointer transition-colors duration-100',
+        'w-full flex items-start gap-1.5 px-2 py-1 rounded text-xs font-mono cursor-pointer transition-colors duration-100',
         selected
           ? 'bg-accent/10 border-l-2 border-accent text-hi pl-1.5'
           : 'text-lo hover:text-mid hover:bg-raised',
       ].join(' ')}
     >
       <ScoreDot score={joke.score} />
-      <span className="truncate text-[10px]">{idx + 1}. {joke.id.slice(0, 8)}…</span>
-      <span className="ml-auto text-[9px] text-lo/70">{joke.score}/10</span>
+      <span className="min-w-0 flex-1 text-left">
+        <span className="block truncate text-[10px] text-hi/90">
+          {preview || `${joke.id.slice(0, 8)}…`}
+        </span>
+        {joke.category && (
+          <span className="block truncate text-[9px] text-lo/70">{joke.category}</span>
+        )}
+      </span>
+      <span className="ml-auto text-[9px] text-lo/70 shrink-0">{joke.score}/10</span>
     </button>
   )
 }
@@ -119,27 +125,20 @@ function FileNode({
   onSelectJoke,
   vPaths,
 }: FileNodeProps) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const filePath = `${cabLabel} > ${drwLabel} > ${file.label}`
   const isDirect = vPaths.has(filePath)
-
-  const { data: detail, isFetching } = useQuery({
-    queryKey: ['file', file.id],
-    queryFn: () => fetchFile(file.id),
-    enabled: open,
-    staleTime: 60_000,
-  })
+  const jokes = file.jokes ?? []
 
   const handleFileClick = () => {
     setOpen((o) => !o)
-    // Auto-select first joke when opening if none selected
-    if (!open && detail?.jokes.length) {
-      const first = detail.jokes[0]
+    if (!open && jokes.length) {
+      const first = jokes[0]
       onSelectJoke(first.id, { cabinet: cabLabel, drawer: drwLabel, file: file.label })
     }
   }
 
-  const isChildSelected = detail?.jokes.some((j) => j.id === selectedJokeId)
+  const isChildSelected = jokes.some((j) => j.id === selectedJokeId)
 
   return (
     <div>
@@ -168,12 +167,7 @@ function FileNode({
 
       {open && (
         <div className="ml-3 pl-2 border-l border-edge/50 mt-0.5 mb-0.5 space-y-0.5">
-          {isFetching && !detail && (
-            <div className="text-[9px] font-mono text-lo/50 px-2 py-1 animate-pulse">
-              Loading…
-            </div>
-          )}
-          {detail?.jokes.map((joke, i) => (
+          {jokes.map((joke, i) => (
             <JokeRow
               key={joke.id}
               joke={joke}
@@ -184,7 +178,7 @@ function FileNode({
               }
             />
           ))}
-          {detail?.jokes.length === 0 && (
+          {jokes.length === 0 && (
             <div className="text-[9px] font-mono text-violation/70 px-2 py-1">No jokes filed</div>
           )}
         </div>
@@ -213,7 +207,7 @@ function DrawerNode({
   vPaths,
   violationFilter,
 }: DrawerNodeProps) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const key = `${cabLabel} > ${drw.label}`
   const isDirect = vPaths.has(key)
   const isTainted = isDirect || drw.files.some((f) => vPaths.has(`${key} > ${f.label}`))
@@ -379,7 +373,11 @@ export default function Tree({
           Archive
         </span>
         <span className="font-mono text-[9px] text-lo/50">
-          {tree.cabinets.length}c · {tree.cabinets.reduce((a, c) => a + c.drawers.length, 0)}d
+          {tree.cabinets.length}c · {tree.cabinets.reduce((a, c) => a + c.drawers.length, 0)}d ·{' '}
+          {tree.cabinets.reduce(
+            (a, c) => a + c.drawers.reduce((b, d) => b + d.files.reduce((n, f) => n + f.joke_count, 0), 0),
+            0,
+          )}j
         </span>
         {violationFilter && (
           <span className="ml-auto text-[9px] font-mono text-violation/70">filtered</span>
@@ -389,6 +387,40 @@ export default function Tree({
       {visibleCabinets.length === 0 && (
         <div className="px-2 py-4 text-center text-[10px] font-mono text-lo">
           {violationFilter ? 'No violations found.' : 'Archive is empty.'}
+        </div>
+      )}
+
+      {!violationFilter && (
+        <div className="px-2 pb-2 mb-1 border-b border-edge/70 space-y-0.5">
+          <div className="font-mono text-[9px] text-lo uppercase tracking-widest">
+            Categories
+          </div>
+          {tree.cabinets.flatMap((cab) =>
+            cab.drawers.flatMap((drw) =>
+              drw.files.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => {
+                    const first = (f.jokes ?? [])[0]
+                    if (first) {
+                      onSelectJoke(first.id, {
+                        cabinet: cab.label,
+                        drawer: drw.label,
+                        file: f.label,
+                      })
+                    }
+                  }}
+                  className="w-full flex items-center gap-1 text-left font-mono text-[10px] text-mid hover:text-hi"
+                >
+                  <span className="truncate flex-1">
+                    {cab.label} › {f.label}
+                  </span>
+                  <span className="text-lo/70 tabular-nums shrink-0">{f.joke_count}</span>
+                </button>
+              )),
+            ),
+          )}
         </div>
       )}
 

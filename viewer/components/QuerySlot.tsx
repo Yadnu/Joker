@@ -206,25 +206,42 @@ export default function QuerySlot({ onSelectJoke, onConnectionChange, onSessionE
 
     ws.onmessage = (e: MessageEvent<ArrayBuffer | string>) => {
       if (e.data instanceof ArrayBuffer) {
-        // Raw PCM16 audio from Joker TTS
         enqueuePCM16(e.data)
         return
       }
 
-      // JSON event forwarded from OpenAI Realtime
       try {
         const event = JSON.parse(e.data as string) as Record<string, unknown>
         const etype = event.type as string | undefined
 
+        if (etype === 'transcript_delta') {
+          const delta = (event.delta as string | undefined) ?? ''
+          if (event.speaker === 'user') {
+            setUserTranscript((t) => t + delta)
+          } else {
+            setTranscript((t) => t + delta)
+          }
+        }
+        if (etype === 'joke_turn') {
+          const content = (event.content as string | undefined) ?? ''
+          if (event.speaker === 'user') setUserTranscript(content)
+          else setTranscript(content)
+        }
+        if (etype === 'librarian_step') {
+          const jid = event.joke_id
+          // Box joke ids are UUIDs (contain '-'). Pre-file joke_{hex} is not
+          // in the archive yet — wait for kind=filed.
+          if (typeof jid === 'string' && (event.kind === 'filed' || jid.includes('-'))) {
+            onSelectJoke(jid)
+          }
+        }
         if (etype === 'response.audio_transcript.delta') {
           setTranscript((t) => t + ((event.delta as string | undefined) ?? ''))
         }
         if (etype === 'response.audio_transcript.done') {
           setTranscript((t) => t.trim())
         }
-        if (
-          etype === 'conversation.item.input_audio_transcription.completed'
-        ) {
+        if (etype === 'conversation.item.input_audio_transcription.completed') {
           const text = (event.transcript as string | undefined) ?? ''
           setUserTranscript((t) => (t ? t + ' ' + text : text))
         }
@@ -243,7 +260,7 @@ export default function QuerySlot({ onSelectJoke, onConnectionChange, onSessionE
         stopSession()
       }
     }
-  }, [enqueuePCM16, stopSession, updateStatus, status])
+  }, [enqueuePCM16, stopSession, updateStatus, status, onSelectJoke])
 
   // ---------------------------------------------------------------------------
   // Render
@@ -324,7 +341,8 @@ export default function QuerySlot({ onSelectJoke, onConnectionChange, onSessionE
 
         {status === 'done' && (
           <p className="font-mono text-[9px] text-lo/50 border-t border-edge pt-1 mt-1">
-            Session ended. New jokes may appear in the archive — browse the tree to find them.
+            Session ended. Filed jokes open in the detail and trace panes
+            automatically when the Librarian reports them.
           </p>
         )}
       </div>

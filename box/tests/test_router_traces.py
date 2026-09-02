@@ -167,6 +167,79 @@ async def test_joke_trace_includes_pre_file_generation_id(client, test_session_f
 
 
 @pytest.mark.asyncio
+async def test_joke_trace_includes_set_and_session_steps(client, test_session_factory):
+    """Set construction and session delivery are not keyed to the Box UUID.
+    GET /jokes/{id}/trace must still surface them so the Viewer can explain
+    how the joke was placed and delivered."""
+    from shared.trace import record_step
+
+    joke_text = "Unique set-join punchline about pretzels at gate C12."
+    p = joke_payload(
+        cabinet="TraceSetCab",
+        drawer="TraceSetDrw",
+        file="TraceSetFile",
+        joke_text=joke_text,
+        set_label="set_trace_join_1",
+        position=2,
+    )
+    r = await client.put("/box/upsert", json=p)
+    assert r.status_code == 201, r.text
+    joke_id = r.json()["joke_id"]
+
+    async with test_session_factory() as session:
+        await record_step(
+            artifact_id="set_trace_join_1",
+            artifact_type="set",
+            kind="set_construction",
+            actor="joker.setbuilder",
+            model="gpt-4o",
+            prompt_ref="prompts/setbuilder_v1.txt",
+            inputs={"angles": []},
+            output={"set_id": "set_trace_join_1"},
+            rationale="Built a 4-slot set around airport-security angles.",
+            latency_ms=15,
+            cost=None,
+            session=session,
+        )
+        await record_step(
+            artifact_id="set_trace_join_1",
+            artifact_type="set",
+            kind="placement",
+            actor="joker.orchestrator",
+            model=None,
+            prompt_ref=None,
+            inputs={"session_id": "sess_join"},
+            output={"set_id": "set_trace_join_1", "slot_count": 4},
+            rationale="Placed the pretzel bit in slot 2 of the set.",
+            latency_ms=2,
+            cost=None,
+            session=session,
+        )
+        await record_step(
+            artifact_id="show-trace-join-sess",
+            artifact_type="session",
+            kind="delivery",
+            actor="joker.realtime",
+            model="elevenlabs-convai",
+            prompt_ref="prompts/realtime_perform_v1.txt",
+            inputs={"joke_text": joke_text, "session_id": "show-trace-join-sess"},
+            output={"interrupted": False},
+            rationale="Completed delivery of slot 2 via elevenlabs (800 ms).",
+            latency_ms=800,
+            cost=None,
+            session=session,
+        )
+        await session.commit()
+
+    r2 = await client.get(f"/jokes/{joke_id}/trace")
+    assert r2.status_code == 200, r2.text
+    kinds = {s["kind"] for s in r2.json()["steps"]}
+    assert "set_construction" in kinds
+    assert "placement" in kinds
+    assert "delivery" in kinds
+
+
+@pytest.mark.asyncio
 async def test_traces_unknown_artifact_returns_empty_not_404(client):
     r = await client.get("/traces/no-such-artifact-id-xyz")
     assert r.status_code == 200

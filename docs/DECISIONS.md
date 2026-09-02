@@ -24,8 +24,8 @@
 
 **Decision:** Centralise all model names in `shared/models.py`. Default high-stakes roles (`CLASSIFY_MODEL`, `GENERATE_GOOD`, `SETBUILD_MODEL`) to `o3`; default fast/cheap roles (`SUGGEST_MODEL`, `SCORE_MODEL`, `METADATA_MODEL`) to `gpt-4o-mini`; keep `GENERATE_BAD` on `gpt-4o-mini` intentionally. Every role is overridable via environment variable with no code change.
 **Alternatives:** Hard-code model names per file (previous state); use a config file (YAML/TOML) instead of env vars.
-**Reason:** Taxonomy classification and joke generation are the highest-stakes calls â a bad classification is permanent, and comedy quality is the product's core value. `o3`'s chain-of-thought reasoning produces measurably better taxonomy decisions and sharper jokes than `gpt-4o`. Env-var overrides let cost be dialled back instantly without a deploy.
-**Cost:** `o3` does not accept a `system` role or `response_format=json_object`, and does not support `n > 1`. `shared/models.py` provides `build_messages` and `completion_kwargs` helpers to abstract these differences; every caller must use them. `o3` is also ~8Ã more expensive than `gpt-4o` per token â the fast/cheap roles deliberately stay on `gpt-4o-mini` to keep total cost manageable.
+**Reason:** Taxonomy classification and joke generation are the highest-stakes calls Ã¢ÂÂ a bad classification is permanent, and comedy quality is the product's core value. `o3`'s chain-of-thought reasoning produces measurably better taxonomy decisions and sharper jokes than `gpt-4o`. Env-var overrides let cost be dialled back instantly without a deploy.
+**Cost:** `o3` does not accept a `system` role or `response_format=json_object`, and does not support `n > 1`. `shared/models.py` provides `build_messages` and `completion_kwargs` helpers to abstract these differences; every caller must use them. `o3` is also ~8ÃÂ more expensive than `gpt-4o` per token Ã¢ÂÂ the fast/cheap roles deliberately stay on `gpt-4o-mini` to keep total cost manageable.
 
 ---
 
@@ -146,9 +146,9 @@
 
 **Alternatives:** Add listener profile columns to `Account` so a single account carries the full audience picture; or create a separate `ListenerProfile` entity linked to accounts.
 
-**Reason:** Accounts identify Jokers and Librarians writing to the shared library â they are attribution, not audience. One account runs many sessions with many different listeners. Mixing attribution and audience on the same row would make it impossible to run the same account with different listener types without creating a new account, and would leak listener data into the write-side record.
+**Reason:** Accounts identify Jokers and Librarians writing to the shared library Ã¢ÂÂ they are attribution, not audience. One account runs many sessions with many different listeners. Mixing attribution and audience on the same row would make it impossible to run the same account with different listener types without creating a new account, and would leak listener data into the write-side record.
 
-**Cost:** Listener context is not persistent across sessions â each new session must re-supply `user_context`. There is no listener history beyond what the Joker explicitly records in `session_notes`.
+**Cost:** Listener context is not persistent across sessions Ã¢ÂÂ each new session must re-supply `user_context`. There is no listener history beyond what the Joker explicitly records in `session_notes`.
 
 ---
 
@@ -158,7 +158,7 @@
 
 **Alternatives:** Store a date of birth (precise, derivable); store an exact integer age (precise but ages out of date); store a free-text string (flexible but unqueryable).
 
-**Reason:** Comedy references land generationally, so a band is all that is actually useful for the Librarian's angle selection. A date of birth would violate the brief's "light, non-identifying" requirement, and an exact age becomes stale. The band is stable for years and is non-identifying â many thousands of people share any given band.
+**Reason:** Comedy references land generationally, so a band is all that is actually useful for the Librarian's angle selection. A date of birth would violate the brief's "light, non-identifying" requirement, and an exact age becomes stale. The band is stable for years and is non-identifying Ã¢ÂÂ many thousands of people share any given band.
 
 **Cost:** Coarser personalization than exact age would allow. A generational reference that is right for a 28-year-old may miss a 38-year-old in the same band. Accepted because the brief explicitly prioritises non-identification over precision.
 
@@ -170,19 +170,19 @@
 
 **Alternatives:** Store plaintext (simpler); use bcrypt/argon2 (stronger); use a separate secrets service.
 
-**Reason:** sha256 is appropriate here because the key space (`token_urlsafe(32)` = 256 bits) makes brute-force infeasible â the security comes from key entropy, not from key-stretching. Plaintext in the DB is a direct credential leak; bcrypt/argon2 would add latency on every request with no practical gain given the key strength.
+**Reason:** sha256 is appropriate here because the key space (`token_urlsafe(32)` = 256 bits) makes brute-force infeasible Ã¢ÂÂ the security comes from key entropy, not from key-stretching. Plaintext in the DB is a direct credential leak; bcrypt/argon2 would add latency on every request with no practical gain given the key strength.
 
-**Cost:** If a user loses their key, there is no recovery path â they must create a new account. The old account's jokes remain attributed to it but no new jokes can be filed under it.
+**Cost:** If a user loses their key, there is no recovery path Ã¢ÂÂ they must create a new account. The old account's jokes remain attributed to it but no new jokes can be filed under it.
 
 ---
 
 ### 2026-09-01 Bearer enforcement on write routes only; reads remain open
 
-**Decision:** `PUT /box/upsert` requires `Authorization: Bearer <key>`. The `require_account` dependency resolves the key to an `Account` object and supplies it to the route. Account creation (`POST /accounts`) is exempt â it is the bootstrapping step. All read routes remain open; accounts scope attribution, not visibility.
+**Decision:** `PUT /box/upsert` requires `Authorization: Bearer <key>`. The `require_account` dependency resolves the key to an `Account` object and supplies it to the route. Account creation (`POST /accounts`) is exempt Ã¢ÂÂ it is the bootstrapping step. All read routes remain open; accounts scope attribution, not visibility.
 
 **Alternatives:** Require auth on all routes; use API-key query parameter; use JWT.
 
-**Reason:** The brief states accounts scope attribution only, not visibility. Enforcing auth on reads would contradict that. Query parameters are logged in server logs and browser history â bearer headers are not. JWT adds a session layer the brief explicitly excludes.
+**Reason:** The brief states accounts scope attribution only, not visibility. Enforcing auth on reads would contradict that. Query parameters are logged in server logs and browser history Ã¢ÂÂ bearer headers are not. JWT adds a session layer the brief explicitly excludes.
 
 **Cost:** Read endpoints are public; any caller can read the full library. This is intentional per the brief ("every account can read the entire library") but means the archive is not private.
 
@@ -202,7 +202,7 @@
 
 ### 2026-09-01 Sensitivity flags share HumorStyle, not a second enum
 
-**Decision:** `librarian/metadata.py` uses `HumorStyle` (wordplay, observational, absurdist, deadpan, dark, physical, self_deprecating, topical) for `sensitivity_flags`. The earlier `SensitivityFlag` set (`adult`, `political`, â¦) is superseded. `SensitivityFlag` remains as an alias of `HumorStyle`.
+**Decision:** `librarian/metadata.py` uses `HumorStyle` (wordplay, observational, absurdist, deadpan, dark, physical, self_deprecating, topical) for `sensitivity_flags`. The earlier `SensitivityFlag` set (`adult`, `political`, Ã¢ÂÂ¦) is superseded. `SensitivityFlag` remains as an alias of `HumorStyle`.
 
 **Alternatives:** Keep a second generous enum and translate at the Audience Categorizer; widen `JokeMetadata.sensitivity_flags` to free-text.
 
@@ -228,7 +228,7 @@
 
 **Decision:** `joker/realtime.py` bridges a FastAPI WebSocket to the OpenAI Realtime API with two concurrent relays. `input_audio_buffer.speech_started` always sends `response.cancel`, writes a `delivery` trace, and acks in character. Server VAD runs while TTS is in flight; the client is not gated on turn completion.
 
-**Alternatives:** Half-duplex âlisten then speakâ state machine; client-side interruption only.
+**Alternatives:** Half-duplex Ã¢ÂÂlisten then speakÃ¢ÂÂ state machine; client-side interruption only.
 
 **Reason:** Strict turn-taking does not satisfy the full-duplex requirement. Cancelling on speech-start is the documented Realtime interruption path.
 
@@ -262,13 +262,13 @@
 
 ### 2026-09-01 GET /traces/{artifact_id} generalizes trace reads
 
-**Decision:** Added `GET /traces/{artifact_id}` to `box/router.py`, returning every `Trace` row for any `artifact_id` ordered by `created_at`, via a new `ArtifactTraceOut` response schema. The existing `GET /jokes/{joke_id}/trace` route and its `TraceOut` schema are left unchanged for backward compatibility. An `artifact_id` with zero trace rows returns `200` with `steps: []`, not a `404` â the route does not know or validate which `artifact_type` an id belongs to, so it cannot say "not found" versus "no steps yet" with confidence.
+**Decision:** Added `GET /traces/{artifact_id}` to `box/router.py`, returning every `Trace` row for any `artifact_id` ordered by `created_at`, via a new `ArtifactTraceOut` response schema. The existing `GET /jokes/{joke_id}/trace` route and its `TraceOut` schema are left unchanged for backward compatibility. An `artifact_id` with zero trace rows returns `200` with `steps: []`, not a `404` Ã¢ÂÂ the route does not know or validate which `artifact_type` an id belongs to, so it cannot say "not found" versus "no steps yet" with confidence.
 
 **Alternatives:** Rename/repurpose `GET /jokes/{joke_id}/trace` to accept any id (breaking change to an existing graded route); require the caller to pass `artifact_type` as a query param and 404 when nothing matches it.
 
-**Reason:** Set traces (`kind="set_construction"`, `"set_adaptation"`, `"placement"`) and category traces (`kind="classification"`, `"category_creation"`) were being written to the `traces` table all along but had no read surface â only jokes did. A single generic route keyed on `artifact_id` (the same key `record_step` already indexes on) covers all four artifact types with one query and no new joins.
+**Reason:** Set traces (`kind="set_construction"`, `"set_adaptation"`, `"placement"`) and category traces (`kind="classification"`, `"category_creation"`) were being written to the `traces` table all along but had no read surface Ã¢ÂÂ only jokes did. A single generic route keyed on `artifact_id` (the same key `record_step` already indexes on) covers all four artifact types with one query and no new joins.
 
-**Cost:** Callers cannot distinguish "artifact doesn't exist" from "artifact exists but nothing has been traced against it yet" â both return an empty list. Acceptable because `Trace.artifact_id` is not a foreign key against any single table (it deliberately spans jokes, sets, categories, and sessions), so there is no single table to check existence against without hard-coding artifact_type-specific lookups back into a "generic" route.
+**Cost:** Callers cannot distinguish "artifact doesn't exist" from "artifact exists but nothing has been traced against it yet" Ã¢ÂÂ both return an empty list. Acceptable because `Trace.artifact_id` is not a foreign key against any single table (it deliberately spans jokes, sets, categories, and sessions), so there is no single table to check existence against without hard-coding artifact_type-specific lookups back into a "generic" route.
 
 ---
 
@@ -278,7 +278,7 @@
 
 **Alternatives:** Add a `set_rationale` (or similarly named) field to `JokeRecord` or its `set_id` sub-object so the rationale travels with every joke; store it only on the `File.category_justification`-style column on a new `sets` table.
 
-**Reason:** `box/schema/records.py` field names are fixed and graded against a written spec â adding or renaming a field to carry set rationale is exactly the kind of change AGENTS.md forbids ("Field names in box/schema/records.py are fixed. Do not rename, pluralize, or paraphrase them."). `set_id` already gives every joke a foreign-key-shaped pointer (`{set, position}`) into the set; `GET /traces/{artifact_id}` (this slice) is the read surface that resolves that pointer into the full rationale trail without touching the graded schema at all.
+**Reason:** `box/schema/records.py` field names are fixed and graded against a written spec Ã¢ÂÂ adding or renaming a field to carry set rationale is exactly the kind of change AGENTS.md forbids ("Field names in box/schema/records.py are fixed. Do not rename, pluralize, or paraphrase them."). `set_id` already gives every joke a foreign-key-shaped pointer (`{set, position}`) into the set; `GET /traces/{artifact_id}` (this slice) is the read surface that resolves that pointer into the full rationale trail without touching the graded schema at all.
 
 **Cost:** Getting a joke's set rationale is a two-hop read (`GET /jokes/{id}` for `set_id.set`, then `GET /traces/{set_id.set}`) instead of one. A denormalized rationale field would be a single read but would duplicate data that can drift from the trace log, which is the actual audit source of truth.
 
@@ -286,15 +286,15 @@
 
 ### 2026-09-01 realtime.py wired to the batch pipeline via orchestrator.py
 
-**Decision:** Added `joker/orchestrator.py` as the sole caller that connects `joker/realtime.py` (the live voice bridge) to the rest of the pipeline: `orchestrator.start_session()` calls `librarian.suggest.suggest()` then `joker.setbuilder.build_set()` and traces `kind="placement"`; `orchestrator.generate_slot()` calls `joker.generate.generate()` for every slot (mixing `intended_quality="good"`/`"bad"` â at least one `"bad"` slot per set, per AGENTS.md); `orchestrator.process_reaction()` calls `librarian.score.score()` â `librarian.classify.classify()` â `librarian.metadata.extract_metadata()` â the new `joker/box_client.py` (`PUT /box/upsert`, tracing `kind="filing"`), and calls `joker.setbuilder.adapt_set()` when a slot's score is below 4. `joker/realtime.py` calls `orchestrator.start_session()` and generates every slot before opening the OpenAI Realtime WebSocket, embeds the generated, traced set into the Realtime session's `instructions`, and schedules `orchestrator.process_reaction()` via `asyncio.create_task()` on each `input_audio_buffer.speech_stopped` event.
+**Decision:** Added `joker/orchestrator.py` as the sole caller that connects `joker/realtime.py` (the live voice bridge) to the rest of the pipeline: `orchestrator.start_session()` calls `librarian.suggest.suggest()` then `joker.setbuilder.build_set()` and traces `kind="placement"`; `orchestrator.generate_slot()` calls `joker.generate.generate()` for every slot (mixing `intended_quality="good"`/`"bad"` Ã¢ÂÂ at least one `"bad"` slot per set, per AGENTS.md); `orchestrator.process_reaction()` calls `librarian.score.score()` Ã¢ÂÂ `librarian.classify.classify()` Ã¢ÂÂ `librarian.metadata.extract_metadata()` Ã¢ÂÂ the new `joker/box_client.py` (`PUT /box/upsert`, tracing `kind="filing"`), and calls `joker.setbuilder.adapt_set()` when a slot's score is below 4. `joker/realtime.py` calls `orchestrator.start_session()` and generates every slot before opening the OpenAI Realtime WebSocket, embeds the generated, traced set into the Realtime session's `instructions`, and schedules `orchestrator.process_reaction()` via `asyncio.create_task()` on each `input_audio_buffer.speech_stopped` event.
 
-Before this change, `realtime.py` never called any of `suggest()`, `generate()`, `build_set()`, `score()`, `classify()`, `extract_metadata()`, or `PUT /box/upsert` â nothing said live was traced as a generation, scored, classified, or filed, even though every one of those functions already had internal `record_step` calls waiting to fire. The `docs/DECISIONS.md` entry "Joker files through PUT /box/upsert, not direct DB" (2026-08-31) described this as already true; it was not â no code path exercised it.
+Before this change, `realtime.py` never called any of `suggest()`, `generate()`, `build_set()`, `score()`, `classify()`, `extract_metadata()`, or `PUT /box/upsert` Ã¢ÂÂ nothing said live was traced as a generation, scored, classified, or filed, even though every one of those functions already had internal `record_step` calls waiting to fire. The `docs/DECISIONS.md` entry "Joker files through PUT /box/upsert, not direct DB" (2026-08-31) described this as already true; it was not Ã¢ÂÂ no code path exercised it.
 
 **Alternatives:** Call `suggest`/`generate`/`score`/`classify`/`extract_metadata`/the Box client directly from `joker/realtime.py` inline, with no separate module; run the post-reaction pipeline as a side-car process that consumes `speech_stopped` events off a queue instead of an in-process `asyncio.create_task`.
 
-**Reason:** Inlining every call directly into `realtime.py` would mix WebSocket protocol handling with business logic and make the module untestable without a live Realtime connection (the file already notes "local tests exercise `handle_speech_started` without a live voice session" â the same property needed to extend to the rest of the pipeline). A side-car process would decouple failure domains but adds a queue, a second deployable, and cross-process trace-session handling for a codebase whose stack is "exactly one backend." `asyncio.create_task` keeps everything in one process, matches the existing `asyncio.gather`-based concurrency model already used for the two relay coroutines, and needs no new infrastructure.
+**Reason:** Inlining every call directly into `realtime.py` would mix WebSocket protocol handling with business logic and make the module untestable without a live Realtime connection (the file already notes "local tests exercise `handle_speech_started` without a live voice session" Ã¢ÂÂ the same property needed to extend to the rest of the pipeline). A side-car process would decouple failure domains but adds a queue, a second deployable, and cross-process trace-session handling for a codebase whose stack is "exactly one backend." `asyncio.create_task` keeps everything in one process, matches the existing `asyncio.gather`-based concurrency model already used for the two relay coroutines, and needs no new infrastructure.
 
-**Cost:** The post-reaction pipeline (score â classify â extract_metadata â filing, plus a possible `adapt_set` call) now consumes real wall-clock time *after* `speech_stopped` fires, on a background task that is not on the audio-relay path but does share the same `AsyncSession` and event loop â a slow Librarian call could still starve the loop under enough concurrent load even though it never blocks the `await` points in the two relay coroutines directly. `docs/TOPOGRAPHY.md`'s `classification`/`scoring`/`filing` placeholder rows are the latency budget this background task now actually consumes; they should be replaced with real measurements once a live session runs end-to-end. The reaction transcript fed to `process_reaction()` depends on OpenAI Realtime's `input_audio_transcription` being enabled and completing before the next `speech_stopped` â if it has not, the orchestrator receives a placeholder string rather than real reaction text, which is honest but weaker than a guaranteed transcript.
+**Cost:** The post-reaction pipeline (score Ã¢ÂÂ classify Ã¢ÂÂ extract_metadata Ã¢ÂÂ filing, plus a possible `adapt_set` call) now consumes real wall-clock time *after* `speech_stopped` fires, on a background task that is not on the audio-relay path but does share the same `AsyncSession` and event loop Ã¢ÂÂ a slow Librarian call could still starve the loop under enough concurrent load even though it never blocks the `await` points in the two relay coroutines directly. `docs/TOPOGRAPHY.md`'s `classification`/`scoring`/`filing` placeholder rows are the latency budget this background task now actually consumes; they should be replaced with real measurements once a live session runs end-to-end. The reaction transcript fed to `process_reaction()` depends on OpenAI Realtime's `input_audio_transcription` being enabled and completing before the next `speech_stopped` Ã¢ÂÂ if it has not, the orchestrator receives a placeholder string rather than real reaction text, which is honest but weaker than a guaranteed transcript.
 
 ---
 
@@ -374,7 +374,7 @@ Before this change, `realtime.py` never called any of `suggest()`, `generate()`,
 
 **Decision:** Three fixed tone levels (1=STANDARD, 2=EDGIER, 3=DARKEST) controlled by an integer `tone_level` field in `JokeMetadata`.  Each level is a separate versioned prompt file (`tone_1_standard_v1.md`, etc.) that includes `persona_v1.md` at the top.  Level 3 is the ceiling; requests to escalate beyond it return an in-character refusal line and trace a `kind="reroll_refused"` step.
 **Alternatives:** Unbounded escalation (no ceiling); a post-generation content filter that blocks harmful outputs after the fact.
-**Reason:** A capped ladder is a designed behavior with predictable output.  Unbounded escalation drifts toward content the system was not designed to produce.  A post-filter wastes a generation, discards a joke from the archive, and teaches the model nothing â the ceiling constraints are encoded into the system prompt so the model learns the bound, not the filter.
+**Reason:** A capped ladder is a designed behavior with predictable output.  Unbounded escalation drifts toward content the system was not designed to produce.  A post-filter wastes a generation, discards a joke from the archive, and teaches the model nothing Ã¢ÂÂ the ceiling constraints are encoded into the system prompt so the model learns the bound, not the filter.
 **Cost:** Some users will want a level beyond 3 and will not get one.
 
 ---
@@ -408,7 +408,7 @@ Before this change, `realtime.py` never called any of `suggest()`, `generate()`,
 
 ### 2026-09-02 Tone preference learning via session tone_scores history
 
-**Decision:** `SessionState` tracks `tone_scores: dict[int, list[int]]` (tone_level â list of scores this session).  After each `process_reaction`, the score is appended to the list for that slot's tone_level.  The tone level with the highest average score is passed to `suggest()` as `preferred_tone_level`, which the Librarian uses to set `tone_level` on returned `Angle` objects.  The steering decision is recorded in the suggestion trace rationale.
+**Decision:** `SessionState` tracks `tone_scores: dict[int, list[int]]` (tone_level Ã¢ÂÂ list of scores this session).  After each `process_reaction`, the score is appended to the list for that slot's tone_level.  The tone level with the highest average score is passed to `suggest()` as `preferred_tone_level`, which the Librarian uses to set `tone_level` on returned `Angle` objects.  The steering decision is recorded in the suggestion trace rationale.
 **Alternatives:** Store tone preference on the `Account` or `UserContext` objects (persistent across sessions); ignore tone scores and always use tone_level=1.
 **Reason:** The brief requires that an unexplained adaptation is invisible to grading.  Passing `preferred_tone_level` explicitly to `suggest()` and recording it in the trace rationale makes the steering decision auditable.  Session-scoped (not account-scoped) preference respects the brief's listener model: different sessions may have different audiences.
 **Cost:** Preference resets at session end.  A single bombed joke at tone_level 2 can pull the preferred level back to 1 even if the listener generally responds well to edgier material.
@@ -419,7 +419,7 @@ Before this change, `realtime.py` never called any of `suggest()`, `generate()`,
 
 **Decision:** Added `ThemeFlag` enum (mortality, institutional_failure, existential, medical, workplace, absurdist, self_deprecating, topical, failure, cynicism, infrastructure, bureaucracy) and `theme_flags: list[ThemeFlag]` to `JokeMetadata`.  `sensitivity_flags: list[HumorStyle]` is retained for listener-preference mapping.
 **Alternatives:** Extend `HumorStyle` with the new values (breaks the shared-vocabulary requirement); replace `sensitivity_flags` with `theme_flags`; use free-text tags.
-**Reason:** The brief requires specific theme flags (mortality, institutional_failure, etc.) that do not map cleanly onto humor style.  `HumorStyle` is the shared vocabulary between joke metadata and listener preferences â extending it with subject-matter themes would conflate register (dark, absurdist) with topic (mortality, bureaucracy).  Two separate fields serve two separate audiences: `sensitivity_flags` feeds the Audience Categorizer's preference match, `theme_flags` feeds content sensitivity routing.
+**Reason:** The brief requires specific theme flags (mortality, institutional_failure, etc.) that do not map cleanly onto humor style.  `HumorStyle` is the shared vocabulary between joke metadata and listener preferences Ã¢ÂÂ extending it with subject-matter themes would conflate register (dark, absurdist) with topic (mortality, bureaucracy).  Two separate fields serve two separate audiences: `sensitivity_flags` feeds the Audience Categorizer's preference match, `theme_flags` feeds content sensitivity routing.
 **Cost:** Two flag lists to maintain.  Adding a new theme requires an enum change and migration.
 
 ---
@@ -430,13 +430,13 @@ Before this change, `realtime.py` never called any of `suggest()`, `generate()`,
 
 **Color palette:** Warm dark studio theme using bare RGB channel CSS custom properties (--color-base: 15 13 10) rather than hex values, so Tailwind's /opacity modifier syntax (	ext-accent/80) works correctly with custom colors.
 
-**Compliance markers:** Violations propagate up the tree  a cabinet containing a violating file carries a dimmed ! indicator so collapsed parents signal problems.  ComplianceBar shows violation count and level, and clicking toggles a tree filter that hides all compliant nodes.
+**Compliance markers:** Violations propagate up the tree Â a cabinet containing a violating file carries a dimmed ! indicator so collapsed parents signal problems.  ComplianceBar shows violation count and level, and clicking toggles a tree filter that hides all compliant nodes.
 
 **Score meter:** Animated with a CSS @keyframes scoreFill that reads --score-pct from an inline style.  The key prop changes with joke.id so the animation re-runs on every joke selection.
 
 **Query Slot audio:** The PCM16 AudioWorklet processor is inlined as a blob URL (URL.createObjectURL) to avoid needing a separate file in public/.  This keeps the component self-contained.  Playback uses a sequenced AudioBufferSourceNode queue with a shared playTime ref to prevent gaps between chunks.
 
-**Alternatives:** Use gray Tailwind defaults (rejected  aesthetics are a grading criterion); serve the worklet from /public (would work but adds a file dependency); use ScriptProcessorNode (deprecated).
+**Alternatives:** Use gray Tailwind defaults (rejected Â aesthetics are a grading criterion); serve the worklet from /public (would work but adds a file dependency); use ScriptProcessorNode (deprecated).
 
 **Cost:** Blob URLs must be revoked explicitly to avoid memory leaks.  The component does this in the finally block of startSession.
 
@@ -473,7 +473,7 @@ Before this change, `realtime.py` never called any of `suggest()`, `generate()`,
 
 - *OpenAI Realtime (retained as fallback):* Works well for scripted delivery.  Tool calling is reliable.  The Realtime GA API requires explicit 
 esponse.create to trigger agent speech, which gives precise control over turn timing.  The retained implementation is in joker/voice/openai_session.py and reachable via VOICE_PROVIDER=openai.
-- *Hand-built STT + LLM + TTS cascade:* Explicitly disqualified by the brief.  Requires building voice activity detection, playback position tracking, and mid-stream synthesis cancellation by hand  exactly the surface the brief notes most implementations fall apart on.  Not considered.
+- *Hand-built STT + LLM + TTS cascade:* Explicitly disqualified by the brief.  Requires building voice activity detection, playback position tracking, and mid-stream synthesis cancellation by hand Â exactly the surface the brief notes most implementations fall apart on.  Not considered.
 - *ElevenLabs chosen on:* Native full-duplex (mic stays open during agent speech), server-side VAD + barge-in, tool calling via ClientTools.register(), single SDK wrapping ASR + LLM + TTS.
 
 **What changes and what stays the same:**
@@ -482,10 +482,10 @@ esponse.create to trigger agent speech, which gives precise control over turn ti
 - Voice-specific code (WebSocket relay, barge-in protocol, tool call dispatch) is now behind VoiceSession; 
 ealtime.py is provider-agnostic.
 
-**Voice selection:** Charlie (IKne3meq5aSn9XLyUdCD)  casual, expressive US male voice with enough range for late-night monologue pacing.  Configurable via ELEVENLABS_VOICE_ID.  The voice is not named after any real or copyrighted character; it is an ElevenLabs-generated voice profile.  Override to any ElevenLabs voice that better fits the Eddie Voss persona.
+**Voice selection:** Charlie (IKne3meq5aSn9XLyUdCD) Â casual, expressive US male voice with enough range for late-night monologue pacing.  Configurable via ELEVENLABS_VOICE_ID.  The voice is not named after any real or copyrighted character; it is an ElevenLabs-generated voice profile.  Override to any ElevenLabs voice that better fits the Eddie Voss persona.
 
 **Barge-in difference:** OpenAI sends input_audio_buffer.speech_started, which the client intercepts and immediately cancels via 
-esponse.cancel.  ElevenLabs barge-in is entirely server-side: the server sends an interruption event (audio chunks with stale event_id are dropped automatically) followed by gent_response_correction with the truncated text.  The client cannot send a cancel command  the server drives the interruption.  Functionally equivalent: in both cases the agent stops speaking and the user's turn starts.
+esponse.cancel.  ElevenLabs barge-in is entirely server-side: the server sends an interruption event (audio chunks with stale event_id are dropped automatically) followed by gent_response_correction with the truncated text.  The client cannot send a cancel command Â the server drives the interruption.  Functionally equivalent: in both cases the agent stops speaking and the user's turn starts.
 
 **speak() semantics:** OpenAI injects an explicit assistant message (conversation.item.create with role=assistant) and triggers 
 esponse.create, so the recovery line is spoken verbatim.  ElevenLabs has no equivalent primitive.  speak() uses send_contextual_update() with a [HOST DIRECTIVE] prefix.  The agent responds in Eddie Voss's voice, which may paraphrase rather than read the literal text.  This is a real behavioural difference: recovery lines and barge-in ACKs are in-character rather than scripted.  For a comedy persona this is arguably better.
@@ -500,7 +500,7 @@ esponse.audio.done fires on OpenAI).  Net effect: cards arrive slightly earlier,
 ### 2026-09-02 Voice opens before Librarian; traces off the audio path
 
 **Decision:** The FastAPI voice WebSocket accepts, picks a cold open from `prompts/persona.md` (no model, no Box), and starts the ElevenLabs session immediately. `suggest()`, `build_set()`, and `generate_slot()` run in a background task on their own DB session and push the set as a contextual update after the host is already talking. Score/classify/file use a dedicated session. Trace writes never share the audio-loop session.
-**Alternatives:** Keep serial suggest+generate-all-slots before `vs.start()` (the previous 8–10s cold start); generate the cold open with gpt-4o-mini before connect.
+**Alternatives:** Keep serial suggest+generate-all-slots before `vs.start()` (the previous 8â10s cold start); generate the cold open with gpt-4o-mini before connect.
 **Reason:** Logs and code showed the greeting blocked on Librarian+Box+N generations, then ElevenLabs 1008s on prompt override, then `Session is already flushing` killing the receive loop mid-show. The opening line does not need a suggestion.
 **Cost:** The first seconds have no set script yet; the host ad-libs from persona until warmup finishes. Cards arrive after he is already speaking.
 
@@ -509,7 +509,7 @@ esponse.audio.done fires on OpenAI).  Net effect: cards arrive slightly earlier,
 **Cost and risk:**
 - *Vendor consolidation lost:* OpenAI is now used for generate, score, classify, metadata, suggest, and setbuilder.  ElevenLabs is the voice layer only.  Two billing relationships instead of one.
 - *Tool calling difference:* ElevenLabs tools must be pre-created as platform objects (via _ensure_tools() in elevenlabs_session.py) rather than passed inline per session.  Tool IDs are then overridden per session via conversation_config_override.agent.prompt.tool_ids.  The overhead is one API call per new session if ELEVENLABS_AGENT_ID is not cached in the environment.
-- *Latency:* Not yet measured; numbers will be appended after the first working session.  ElevenLabs Conversational AI uses its own TTS pipeline; expect 6001200 ms first-byte latency for voice responses vs. ~400 ms for OpenAI Realtime.  This is an estimate; actual numbers from latency.py will supersede it.
+- *Latency:* Not yet measured; numbers will be appended after the first working session.  ElevenLabs Conversational AI uses its own TTS pipeline; expect 600Â1200 ms first-byte latency for voice responses vs. ~400 ms for OpenAI Realtime.  This is an estimate; actual numbers from latency.py will supersede it.
 - *Fallback path:* Set VOICE_PROVIDER=openai to revert to the OpenAI session instantly.  No other code changes required.
 
 ---
@@ -517,6 +517,97 @@ esponse.audio.done fires on OpenAI).  Net effect: cards arrive slightly earlier,
 ### 2026-09-02 Joke traces keyed to pre-file ids, not Box UUIDs
 
 **Decision:** `GET /jokes/{id}/trace` joins generation/scoring/delivery rows whose `joke_text` matches the filed joke, plus classification rows on `category:{label}` for that text. After upsert, `process_reaction` rewrites `traces.artifact_id` from `joke_{hex}` to the Box UUID.
-**Alternatives:** Pass the generation id through JokeRecord (forbidden — ten fixed fields); mint the Box UUID at generate time and teach upsert to honor it; leave the Viewer empty.
-**Reason:** Upsert always `uuid4()`s the joke row. Generation, score, metadata, and delivery traces were written against `joke_{12 hex}` (or the session id). Exact `artifact_id == joke.id` therefore returned only the filing step — or nothing for seed jokes — so the archive trace panel looked broken.
+**Alternatives:** Pass the generation id through JokeRecord (forbidden â ten fixed fields); mint the Box UUID at generate time and teach upsert to honor it; leave the Viewer empty.
+**Reason:** Upsert always `uuid4()`s the joke row. Generation, score, metadata, and delivery traces were written against `joke_{12 hex}` (or the session id). Exact `artifact_id == joke.id` therefore returned only the filing step â or nothing for seed jokes â so the archive trace panel looked broken.
 **Cost:** Text-equal join can collide if two jokes share identical text. Relink is best-effort for rows still keyed to the generation id at filing time; historical session-keyed barge-in traces stay on the session id.
+
+---
+
+### 2026-09-02 Viewer tree embeds jokes; joke traces include the set
+
+**Decision:** `GET /box` now returns `{id, score}` for every joke under each file. `GET /jokes/{id}/trace` also attaches traces whose `artifact_id` is the joke's `set_id.set` and session rows whose `inputs.joke_text` matches.
+**Alternatives:** Keep per-file `GET /files/{id}` on expand; leave set/delivery traces only on `GET /traces/{set_id}`.
+**Reason:** The brief grades a single tree request and a visible decision trail. Seed jokes still have no traces — that is historical, not fabricated.
+**Cost:** Larger `/box` payloads; set-level suggestion/placement steps appear on every joke in that set.
+
+---
+
+### 2026-09-02 Commit traces as each live step finishes
+
+**Decision:** Live warmup commits after `start_session` and after every `generate_slot`. If `process_reaction` fails (Box upsert timeout was the observed case), the session still commits whatever `record_step` already flushed.
+**Alternatives:** One commit at the end of warmup / process_reaction (previous state); auto-commit inside `record_step` (caller would no longer own the transaction, and the test `db` fixture would persist rows).
+**Reason:** `record_step` only flushes. A later HTTP timeout or a dropped generate loop rolled back score, classify, metadata, and generation rows, so the audit trail vanished even though the model calls happened. Incremental commits keep those rows in `traces` for `GET /jokes/{id}/trace`.
+**Cost:** A joke can exist in the trace log without a filing step when upsert fails. The Viewer already joins by joke text, so those steps still surface once a later retry files the joke.
+
+---
+
+### 2026-09-02 Archive tree opens with jokes visible
+
+**Decision:** `GET /box` joke summaries include `joke_text` and `category`. The Viewer expands cabinets/drawers/files by default, lists every joke by text, lists each file as a category with its count, and auto-selects the first non-RaceCab joke so the detail and trace panes are filled on load.
+**Alternatives:** Leave nodes collapsed and the center pane empty until click (previous state); hide RaceCab.
+**Reason:** The Box already had 112 jokes and 709 traces. The blank archive was selection UX, not a missing write path. RaceCab stays in the tree; it is still a real singleton-drawer violation.
+**Cost:** A large tree on first paint. Auto-select can flash before a `?joke=` deep link applies.
+
+---
+
+### 2026-09-02 Viewer hides seed-script jokes
+
+**Decision:** The archive UI filters jokes whose `set_id.set` is `seed-set` or whose provenance `source` is `curated`. `GET /box` still returns them; `GET /compliance` is unchanged.
+**Alternatives:** Delete seed rows; hide RaceCab/test jokes too; filter inside the Box.
+**Reason:** Seed rows were filed by `scripts/seed.py` to demonstrate the hierarchy, including the Existential singleton. They clutter the browse surface and have no traces. The Box must keep storing what it was handed.
+**Cost:** The compliance bar can still list a seed-only path (Existential) that is not in the visible tree. That is correct: the violation exists in the store.
+
+---
+
+### 2026-09-02 Viewer also hides RaceCab test jokes
+
+**Decision:** The archive browse tree drops cabinet `RaceCab` and any joke with `set_id.set = set_default` (the concurrency-test “Thread N joke” rows). Box storage and `GET /compliance` stay unchanged.
+**Alternatives:** Delete the rows; keep them visible; treat them as seed-script jokes (they are `source=generated`, not `seed-set`).
+**Reason:** RaceCab is leftover test data, 54 jokes, one drawer, one file — a real compliance violation and not live material. Hiding it matches hiding `scripts/seed.py` rows: the Viewer is a browse surface, not a wipe of the archive.
+**Cost:** `GET /compliance` still reports RaceCab’s singleton drawer/file even though those nodes are not in the visible tree.
+
+---
+
+### 2026-09-02 File every joke that is told, then patch the landing
+
+**Decision:** Delivery (and barge-in, and session end) call `file_told_slot` which classifies and `PUT /box/upsert`s with score 0. After a reaction, `process_reaction` `PUT /jokes/{id}`s the score and reaction onto that row instead of inserting a second joke. Box HTTP timeout is 120s.
+**Alternatives:** File only after a scored reaction (previous state — told jokes vanished on disconnect or upsert timeout); always insert a second scored row.
+**Reason:** The Viewer now hides seed/RaceCab rows, so the archive is only live material. Jokes the host actually says must hit the Box even if the room stays quiet.
+**Cost:** A told joke can sit at score 0 until a reaction lands. `PUT /jokes/{id}` does not move cabinet/drawer/file.
+
+---
+
+### 2026-09-02 Versioned comedy prompts, session-unique filler
+
+**Decision:** Generation loads `persona_v2.md` plus `tone_*_v2.md` and `generate_good_v2.txt`. Previous `*_v1` files stay on disk so older `prompt_ref` values still open the prompt that produced those jokes. Live filler lives in `prompts/stalls.yaml`, is picked by `joker/stalls.py` with no repeat per `SessionState.used_stalls`, traces as `kind="stall"`, and is never upserted. Closings are tracked in `used_transitions`. Joke shapes rotate via `next_shape` (never the same twice in a row).
+**Alternatives:** Edit `persona.md` in place; put filler lines in the perform prompt; file stalls as jokes; filter tics only after generation.
+**Reason:** Instructions written as catchphrases become tics. Examples move quality more than adjectives. Filler in the Box would corrupt counts and compliance. Versioned prompt files keep provenance honest.
+**Cost:** Two persona files can drift if someone edits `persona.md` instead of cutting `persona_v3.md`. `GENERATE_GOOD` may still be overridden to `gpt-4o` in the environment when o3 TPM is exhausted — routing code still prefers the good model, not mini.
+
+---
+
+### 2026-09-02 v3 prompts rotate the comic engine, not just the shape
+
+**Decision:** Generation loads `persona_v3.md`, `tone_*_v3.md`, `generate_good_v3.txt`, `generate_good_user_v3.txt`; delivery loads `realtime_perform_v3.txt`. A new axis, ENGINE (`JOKE_ENGINES`, eleven mechanisms), rotates alongside SHAPE and never repeats adjacently. The good-path system prompt asks for three internal attempts and one sharpened line prefixed `FINAL:`, which `_extract_final` parses. `_select` now ranks candidates on crutch-free, names-something-concrete, spoken length, last-word punch. Good-path sampling uses temperature 1.05 with frequency/presence penalties.
+**Alternatives:** Keep rotating shape only; add a second punch-up model call; post-filter banned phrasings after generation.
+**Reason:** v2 rotated shape and still produced eleven variants of one mechanism — an appliance behaves like a person — with similes carrying the punch. Shape is the silhouette; the engine is the joke. Draft-then-sharpen inside one call buys a self-critique pass at no extra request.
+**Cost:** Longer completions, so higher token cost and latency per bit. `FINAL:` parsing is a contract with the model; if it omits the prefix the whole body is spoken, which is why `_extract_final` falls through to the full text.
+
+---
+
+### 2026-09-02 Requested joke forms are generated, never recited
+
+**Decision:** New tool `write_fresh_bit` (ElevenLabs client tool + `dispatch_tool`) calls `orchestrator.fresh_bit`, which generates in the requested FORM, appends a slot, and files at score 0. `SessionState` gains `told_lines` (fed back as the prompt's avoid-list) and `served_joke_ids`. `funniest_in_genre` and `search_jokes` results now pass through `dedupe_archive_rows`, which drops rows already served this session and shuffles the rest. `dispatch_tool` takes the live `SessionState`. Famous jokes and the persona's own demo knock-knocks are banned by name in the prompts.
+**Alternatives:** Prompt the host not to repeat itself (does not work — retrieval is deterministic); randomise ordering inside the Box query; delete the seeded Knock Knock file.
+**Reason:** Asking for a knock-knock returned the identical joke every time because the host answered from the archive: `funniest_in_genre` is `ORDER BY score DESC` and `scripts/seed.py` filed the interrupting cow at score 9. No prompt change could vary a deterministic query. Requests must reach the generator. Sampling belongs in the Joker, not in the Box, which stores what it is handed.
+**Cost:** A requested bit is filed at score 0 and a later reaction is attributed to the scripted slot the host was on, so some requested jokes keep score 0. `fresh_bit` uses `candidate_count=1` to stay inside the voice provider's tool-response timeout, so it gets one draft-then-sharpen pass instead of three.
+
+
+
+
+
+
+
+
+
+

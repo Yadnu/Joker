@@ -32,6 +32,8 @@ VALID_KINDS: frozenset[str] = frozenset(
         # "reroll_refused" records the ceiling hit when tone_level is already 3.
         "reroll",
         "reroll_refused",
+        # Performance filler covering latency. Never a joke. Never filed.
+        "stall",
     }
 )
 
@@ -60,7 +62,7 @@ async def record_step(
         artifact_id:   Identifier of the primary artifact being recorded
                        (joke_id, set_id, category label, etc.).
         artifact_type: Kind of artifact ("joke", "set", "category", "score", …).
-        kind:          One of the eleven valid step kinds defined in VALID_KINDS.
+        kind:          One of the kinds listed in VALID_KINDS.
         actor:         Component that produced this step ("librarian.classify",
                        "joker.generate", etc.).
         model:         Model name if a model was called; None otherwise.

@@ -16,7 +16,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from box.schema.models import Cabinet, Drawer, File, Joke
-from box.schema.records import JokeRecord
+from box.schema.records import JokeMetadata, JokeRecord
 from shared.trace import record_step
 
 BOX_BASE_URL = os.environ.get("BOX_BASE_URL", "http://localhost:8000")
@@ -29,7 +29,7 @@ def _client_factory() -> httpx.AsyncClient:
     """
     return httpx.AsyncClient(
         base_url=os.environ.get("BOX_BASE_URL", BOX_BASE_URL),
-        timeout=30.0,
+        timeout=120.0,
     )
 
 
@@ -112,6 +112,55 @@ async def upsert_joke(
             session=session,
         )
 
+    return result
+
+
+async def update_joke_landing(
+    *,
+    joke_id: str,
+    user_reaction: str,
+    score: int,
+    category: str,
+    metadata: JokeMetadata,
+    session: AsyncSession | None = None,
+    api_key: str | None = None,
+) -> dict:
+    """Update score and reaction on a joke already filed at tell-time."""
+    key = _api_key(api_key)
+    payload = {
+        "user_reaction": user_reaction,
+        "score": score,
+        "category": category,
+        "metadata": metadata.model_dump(mode="json"),
+    }
+    t0 = time.monotonic()
+    async with _client_factory() as client:
+        response = await client.put(
+            f"/jokes/{joke_id}",
+            json=payload,
+            headers={"Authorization": f"Bearer {key}"},
+        )
+    latency_ms = int((time.monotonic() - t0) * 1000)
+    response.raise_for_status()
+    result = response.json()
+    if session is not None:
+        await record_step(
+            artifact_id=joke_id,
+            artifact_type="joke",
+            kind="filing",
+            actor="joker.box_client",
+            model=None,
+            prompt_ref=None,
+            inputs={"joke_id": joke_id, "score": score},
+            output={"joke_id": joke_id, "score": score},
+            rationale=(
+                f"Updated landing on already-filed joke {joke_id}: "
+                f"score {score}/10, reaction captured."
+            ),
+            latency_ms=latency_ms,
+            cost=None,
+            session=session,
+        )
     return result
 
 

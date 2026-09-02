@@ -6,12 +6,13 @@
  * Supports ?joke=<id> deep link from the Critic's card feed.
  */
 
-import { useState, useCallback, useEffect, Suspense } from 'react'
+import { useState, useCallback, useEffect, useMemo, Suspense } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { fetchTree, fetchCompliance } from '@/lib/api'
 import type { SelectionPath } from '@/lib/types'
+import { pickFirstArchiveJoke, treeWithoutSeedJokes } from '@/lib/archive'
 
 import ComplianceBar from '@/components/ComplianceBar'
 import Tree from '@/components/Tree'
@@ -48,12 +49,20 @@ export default function ViewerPage() {
   const [violationFilter, setViolationFilter] = useState(false)
   const [wsConnected, setWsConnected] = useState(false)
 
-  const { data: tree } = useQuery({ queryKey: ['tree'], queryFn: fetchTree })
-  const { data: compliance } = useQuery({
+  const { data: tree, isError: treeFailed, error: treeError } = useQuery({
+    queryKey: ['tree'],
+    queryFn: fetchTree,
+  })
+  const { data: compliance, isError: complianceFailed, error: complianceError } = useQuery({
     queryKey: ['compliance'],
     queryFn: fetchCompliance,
     refetchInterval: 60_000,
   })
+
+  const browseTree = useMemo(
+    () => (tree ? treeWithoutSeedJokes(tree) : undefined),
+    [tree],
+  )
 
   const handleSelectJoke = useCallback(
     (id: string, path?: SelectionPath) => {
@@ -62,6 +71,12 @@ export default function ViewerPage() {
     },
     [],
   )
+
+  useEffect(() => {
+    if (selectedJokeId || !browseTree) return
+    const first = pickFirstArchiveJoke(browseTree)
+    if (first) handleSelectJoke(first.id, first.path)
+  }, [browseTree, selectedJokeId, handleSelectJoke])
 
   const handleSessionEnd = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ['tree'] })
@@ -113,8 +128,20 @@ export default function ViewerPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* Left — tree */}
         <aside className="w-72 shrink-0 flex flex-col border-r border-edge overflow-hidden">
+          {treeFailed && (
+            <div className="m-2 px-2 py-1.5 font-mono text-[10px] text-violation/90 bg-violation/10 border border-violation/30 rounded">
+              Archive failed to load
+              {treeError instanceof Error ? `: ${treeError.message}` : '.'}
+            </div>
+          )}
+          {complianceFailed && (
+            <div className="mx-2 mb-1 px-2 py-1.5 font-mono text-[10px] text-violation/90 bg-violation/10 border border-violation/30 rounded">
+              Compliance check failed
+              {complianceError instanceof Error ? `: ${complianceError.message}` : '.'}
+            </div>
+          )}
           <Tree
-            tree={tree}
+            tree={browseTree}
             compliance={compliance}
             violationFilter={violationFilter}
             selectedJokeId={selectedJokeId}
@@ -127,7 +154,7 @@ export default function ViewerPage() {
           <JokeDetail
             jokeId={selectedJokeId}
             selectionPath={selectionPath}
-            tree={tree}
+            tree={browseTree}
           />
         </main>
 

@@ -397,3 +397,42 @@ async def test_generate_slot_records_generation_latency(db):
     report = tracker.report()
     assert Stage.GENERATION in report
     assert report[Stage.GENERATION]["n"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_file_told_slot_upserts_without_scoring(db, monkeypatch):
+    order: list[str] = []
+    monkeypatch.setattr(box_client, "_client_factory", _mock_box_transport(order))
+    state = _base_state()
+
+    with patch("joker.orchestrator.score", new=AsyncMock(side_effect=AssertionError("score"))), \
+         patch(
+             "joker.orchestrator.classify",
+             new=AsyncMock(
+                 return_value=ClassificationResponse(
+                     category="AirportSecurity",
+                     is_new=False,
+                     justification="Existing label fits.",
+                     path=["Travel", "Airports", "AirportSecurity"],
+                 )
+             ),
+         ), \
+         patch(
+             "joker.orchestrator.extract_metadata",
+             new=AsyncMock(
+                 return_value=JokeMetadata(
+                     topic="TSA", style="one-liner", length="short", sensitivity_flags=[]
+                 )
+             ),
+         ):
+        result = await orchestrator.file_told_slot(
+            state=state, slot_idx=0, session=db
+        )
+
+    assert "upsert" in order
+    assert result["joke_id"] == "joke_filed_orch_1"
+    assert result["score"] == 0
+    assert state.generations[0].filed_id == "joke_filed_orch_1"
+    again = await orchestrator.file_told_slot(state=state, slot_idx=0, session=db)
+    assert again["already_filed"] is True
+

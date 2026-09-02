@@ -54,6 +54,7 @@ from joker.latency import LatencyTracker, Stage
 from joker.timing import mark as tmark
 from joker.timing import now as tnow
 from joker.tools import dispatch_tool
+from joker.stalls import pick_stall
 from joker.voice import VoiceCallbacks, make_voice_session
 from shared.db import session_maker
 from shared.trace import record_step
@@ -97,6 +98,122 @@ async def _isolated_record_step(**kwargs: Any) -> None:
             await session.commit()
     except Exception:
         _LOG.exception("isolated trace failed")
+
+
+async def _keep_flushed_traces(session: Any) -> None:
+    """Commit whatever record_step already flushed, even if a later step failed.
+
+    Score/classify/generate traces must survive a Box upsert timeout. record_step
+    only flushes; without this commit the session rollback drops the audit trail.
+    """
+    try:
+        await session.commit()
+    except Exception:
+        _LOG.exception("trace commit failed")
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+
+
+async def _speak_stall(
+    *,
+    vs: Any,
+    state: Any,
+    category: str,
+    session_id: str,
+    wait: str,
+    topic: str | None = None,
+) -> None:
+    """Speak unused filler. Trace as stall. Never file to the Box."""
+    if vs is None or state is None:
+        return
+    line = pick_stall(category, state, topic=topic)
+    if not line:
+        return
+    t0 = time.monotonic()
+    try:
+        await vs.speak(line)
+    except Exception:
+        _LOG.exception("stall speak failed category=%s", category)
+        return
+    ms = max(0, int((time.monotonic() - t0) * 1000))
+    await _isolated_record_step(
+        artifact_id=session_id,
+        artifact_type="session",
+        kind="stall",
+        actor="joker.realtime",
+        model=None,
+        prompt_ref="prompts/stalls.yaml",
+        inputs={
+            "category": category,
+            "wait": wait,
+            "topic": topic,
+            "filed": False,
+        },
+        output={"line": line, "filed": False},
+        rationale=(
+            f"Filler covering {wait}. Performance only — not a joke, "
+            "not scored, not assigned a genre, not filed to the Box."
+        ),
+        latency_ms=ms,
+        cost=None,
+    )
+
+
+async def _file_told_task(
+    *,
+    session_state: orchestrator.SessionState,
+    slot_idx: int,
+    client_ws: WebSocket,
+) -> None:
+    """Classify and upsert a delivered (or cut) joke so the archive is not empty."""
+    try:
+        factory = session_maker()
+        async with factory() as db_session:
+            try:
+                result = await orchestrator.file_told_slot(
+                    state=session_state,
+                    slot_idx=slot_idx,
+                    session=db_session,
+                )
+                await db_session.commit()
+            except Exception:
+                await _keep_flushed_traces(db_session)
+                raise
+        if result and not result.get("already_filed"):
+            path_parts = result.get("path") or []
+            filed_path = " › ".join(path_parts) if path_parts else result.get("category", "")
+            await _emit(client_ws, {
+                "type": "librarian_step",
+                "kind": "filed",
+                "actor": "joker.box_client",
+                "model": None,
+                "latency_ms": 0,
+                "rationale": f"Filed as told at {filed_path}.",
+                "payload": {
+                    "path": filed_path,
+                    "joke_id": result.get("joke_id"),
+                    "told": True,
+                },
+                "joke_id": result.get("joke_id"),
+            })
+    except Exception:
+        _LOG.exception("file_told_slot failed; session-end flush may retry")
+
+
+async def _flush_unfiled_slots(state: orchestrator.SessionState) -> None:
+    try:
+        factory = session_maker()
+        async with factory() as db_session:
+            try:
+                await orchestrator.file_unfiled_slots(state=state, session=db_session)
+                await db_session.commit()
+            except Exception:
+                await _keep_flushed_traces(db_session)
+                raise
+    except Exception:
+        _LOG.exception("session-end file_unfiled_slots failed")
 
 
 def _spawn(tasks: set[asyncio.Task], coro: Any) -> asyncio.Task:
@@ -155,6 +272,7 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
         reaction_transcript_parts: list[str] = []
         delivery_start_time: float | None = None
         first_audio_logged = False
+        topic_acked_this_window = False
 
         # voice_session_ref is set after the session is created but before
         # callbacks fire — it is safe because start() runs before any events.
@@ -198,7 +316,7 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
                 kind="delivery",
                 actor="joker.realtime",
                 model=_TRACE_MODEL,
-                prompt_ref="prompts/realtime_perform_v1.txt",
+                prompt_ref="prompts/realtime_perform_v3.txt",
                 inputs={
                     "session_id": session_id,
                     "slot_idx": current_slot_idx,
@@ -239,6 +357,18 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
                 ),
             })
             delivery_start_time = None
+            if (
+                session_state is not None
+                and current_slot_idx in session_state.generations
+            ):
+                _spawn(
+                    background_tasks,
+                    _file_told_task(
+                        session_state=session_state,
+                        slot_idx=current_slot_idx,
+                        client_ws=websocket,
+                    ),
+                )
 
         async def on_agent_transcript_delta(delta: str) -> None:
             if delta:
@@ -256,7 +386,7 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
             })
 
         async def on_user_transcript(transcript: str) -> None:
-            nonlocal reaction_transcript_parts
+            nonlocal reaction_transcript_parts, topic_acked_this_window
             if transcript:
                 reaction_transcript_parts.append(transcript)
                 await _emit(websocket, {
@@ -264,6 +394,25 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
                     "speaker": "user",
                     "delta": transcript,
                 })
+                # Topic-aware filler while the next bit loads. Never filed.
+                if (
+                    not topic_acked_this_window
+                    and len(transcript.split()) >= 1
+                    and state_box[0] is not None
+                    and voice_session_ref[0] is not None
+                ):
+                    topic_acked_this_window = True
+                    _spawn(
+                        background_tasks,
+                        _speak_stall(
+                            vs=voice_session_ref[0],
+                            state=state_box[0],
+                            category="topic_acknowledgment",
+                            session_id=session_id,
+                            wait="listener_named_topic",
+                            topic=transcript,
+                        ),
+                    )
 
         async def on_barge_in(cut_text: str, at_ms: int) -> None:
             nonlocal interrupted_current
@@ -302,9 +451,21 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
                 "cut_text": cut_slot.joke_text if cut_slot else cut_text,
                 "at_ms": at_ms,
             })
+            if (
+                session_state is not None
+                and current_slot_idx in session_state.generations
+            ):
+                _spawn(
+                    background_tasks,
+                    _file_told_task(
+                        session_state=session_state,
+                        slot_idx=current_slot_idx,
+                        client_ws=websocket,
+                    ),
+                )
 
         async def on_user_speech_stop() -> None:
-            nonlocal interrupted_current, reaction_transcript_parts, current_slot_idx
+            nonlocal interrupted_current, reaction_transcript_parts, current_slot_idx, topic_acked_this_window
             skip_file = interrupted_current
             interrupted_current = False
 
@@ -324,7 +485,7 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
                 output={"event": "speech_stopped"},
                 rationale=(
                     "User finished speaking; reaction window closed."
-                    + (" Barged slot not filed." if skip_file else "")
+                    + (" Barged slot still filed as told." if skip_file else "")
                 ),
                 latency_ms=0,
                 cost=None,
@@ -372,12 +533,21 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
                 current_slot_idx += 1
 
             reaction_transcript_parts = []
+            topic_acked_this_window = False
 
         async def on_tool_call(name: str, args: dict) -> Any:
             try:
                 factory = session_maker()
                 async with factory() as session:
-                    return await dispatch_tool(name, args, session)
+                    try:
+                        result = await dispatch_tool(
+                            name, args, session, state=state_box[0]
+                        )
+                        await session.commit()
+                    except Exception:
+                        await _keep_flushed_traces(session)
+                        raise
+                    return result
             except Exception:
                 _LOG.exception("tool call %s failed", name)
                 return {"error": "tool_failed"}
@@ -422,83 +592,103 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
                 try:
                     factory = session_maker()
                     async with factory() as db:
-                        tmark(t0, "warmup_suggest_start")
-                        state = await orchestrator.start_session(
-                            session_id=session_id,
-                            listener_context=listener_context,
-                            taxonomy_snapshot_version=date.today().isoformat(),
-                            session=db,
-                            joker_name=os.environ.get("JOKER_NAME", "joker-v1"),
-                            account_name=os.environ.get("BOX_ACCOUNT_NAME", "joker-live"),
-                            box_api_key=os.environ.get("BOX_API_KEY"),
-                            tracker=tracker,
-                        )
-                        state_box[0] = state
-                        tmark(
-                            t0,
-                            "suggest_and_set_done",
-                            f"slots={len(state.joke_set.slots)}",
-                        )
-                        await _emit(websocket, {"type": "session_state", "state": "connected"})
-                        await _emit(websocket, {
-                            "type": "librarian_step",
-                            "kind": "suggestion",
-                            "actor": "librarian.suggest",
-                            "model": None,
-                            "latency_ms": 0,
-                            "rationale": (
-                                state.angles[0].rationale if state.angles
-                                else "No angles returned."
-                            ),
-                            "payload": {
-                                "angles": [
-                                    {
-                                        "genre": a.genre,
-                                        "topic": a.topic,
-                                        "rationale": a.rationale,
-                                        "tone_level": a.tone_level,
-                                    }
-                                    for a in state.angles
-                                ],
-                                "slot_count": len(state.joke_set.slots),
-                            },
-                            "joke_id": None,
-                        })
-                        for slot_idx in range(len(state.joke_set.slots)):
-                            await orchestrator.generate_slot(
-                                state=state,
-                                slot_idx=slot_idx,
+                        try:
+                            tmark(t0, "warmup_suggest_start")
+                            state = await orchestrator.start_session(
+                                session_id=session_id,
+                                listener_context=listener_context,
+                                taxonomy_snapshot_version=date.today().isoformat(),
                                 session=db,
+                                joker_name=os.environ.get("JOKER_NAME", "joker-v1"),
+                                account_name=os.environ.get("BOX_ACCOUNT_NAME", "joker-live"),
+                                box_api_key=os.environ.get("BOX_API_KEY"),
                                 tracker=tracker,
                             )
-                            gen = state.generations.get(slot_idx)
-                            slot = state.joke_set.slots[slot_idx]
-                            if gen is not None:
-                                await _emit(websocket, {
-                                    "type": "librarian_step",
-                                    "kind": "generation",
-                                    "actor": "joker.generate",
-                                    "model": gen.provenance.model,
-                                    "latency_ms": 0,
-                                    "rationale": gen.provenance.selection_rationale,
-                                    "payload": {
-                                        "slot_idx": slot_idx,
-                                        "slot_name": slot.name,
-                                        "topic": gen.topic,
-                                        "tone_level": gen.tone_level,
-                                        "intended_quality": gen.intended_quality,
-                                        "prompt_ref": gen.provenance.prompt,
-                                    },
-                                    "joke_id": gen.joke_id,
-                                })
-                        await db.commit()
-                        tmark(t0, "all_slots_generated")
-                        v = voice_session_ref[0]
-                        if v is not None:
-                            await v.update_instructions(
-                                orchestrator.render_set_instructions(state)
+                            await db.commit()
+                            state_box[0] = state
+                            tmark(
+                                t0,
+                                "suggest_and_set_done",
+                                f"slots={len(state.joke_set.slots)}",
                             )
-                        tmark(t0, "set_instructions_pushed")
+                            await _emit(websocket, {"type": "session_state", "state": "connected"})
+                            await _emit(websocket, {
+                                "type": "librarian_step",
+                                "kind": "suggestion",
+                                "actor": "librarian.suggest",
+                                "model": None,
+                                "latency_ms": 0,
+                                "rationale": (
+                                    state.angles[0].rationale if state.angles
+                                    else "No angles returned."
+                                ),
+                                "payload": {
+                                    "angles": [
+                                        {
+                                            "genre": a.genre,
+                                            "topic": a.topic,
+                                            "rationale": a.rationale,
+                                            "tone_level": a.tone_level,
+                                        }
+                                        for a in state.angles
+                                    ],
+                                    "slot_count": len(state.joke_set.slots),
+                                },
+                                "joke_id": None,
+                            })
+                            for slot_idx in range(len(state.joke_set.slots)):
+                                v = voice_session_ref[0]
+                                stall = (
+                                    _speak_stall(
+                                        vs=v,
+                                        state=state,
+                                        category="thinking",
+                                        session_id=session_id,
+                                        wait=f"generate_slot_{slot_idx}",
+                                    )
+                                    if v is not None
+                                    else asyncio.sleep(0)
+                                )
+                                await asyncio.gather(
+                                    orchestrator.generate_slot(
+                                        state=state,
+                                        slot_idx=slot_idx,
+                                        session=db,
+                                        tracker=tracker,
+                                    ),
+                                    stall,
+                                )
+                                await db.commit()
+                                gen = state.generations.get(slot_idx)
+                                slot = state.joke_set.slots[slot_idx]
+                                if gen is not None:
+                                    await _emit(websocket, {
+                                        "type": "librarian_step",
+                                        "kind": "generation",
+                                        "actor": "joker.generate",
+                                        "model": gen.provenance.model,
+                                        "latency_ms": 0,
+                                        "rationale": gen.provenance.selection_rationale,
+                                        "payload": {
+                                            "slot_idx": slot_idx,
+                                            "slot_name": slot.name,
+                                            "topic": gen.topic,
+                                            "tone_level": gen.tone_level,
+                                            "intended_quality": gen.intended_quality,
+                                            "prompt_ref": gen.provenance.prompt,
+                                        },
+                                        "joke_id": gen.joke_id,
+                                    })
+                            tmark(t0, "all_slots_generated")
+                            v = voice_session_ref[0]
+                            if v is not None:
+                                await v.update_instructions(
+                                    orchestrator.render_set_instructions(state)
+                                )
+                            tmark(t0, "set_instructions_pushed")
+                        except Exception:
+                            await _keep_flushed_traces(db)
+                            raise
                 except Exception:
                     _LOG.exception("warmup failed; host keeps talking")
 
@@ -515,6 +705,9 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
                 flush=True,
             )
             await vs.close()
+            leftover = state_box[0]
+            if leftover is not None:
+                _spawn(background_tasks, _flush_unfiled_slots(leftover))
             if background_tasks:
                 await asyncio.gather(*background_tasks, return_exceptions=True)
             tracker.flush_to_topography(Path("docs/TOPOGRAPHY.md"))
@@ -627,14 +820,18 @@ async def _process_reaction_task(
     try:
         factory = session_maker()
         async with factory() as db_session:
-            result = await orchestrator.process_reaction(
-                state=session_state,
-                slot_idx=slot_idx,
-                user_reaction=user_reaction,
-                session=db_session,
-                tracker=tracker,
-            )
-            await db_session.commit()
+            try:
+                result = await orchestrator.process_reaction(
+                    state=session_state,
+                    slot_idx=slot_idx,
+                    user_reaction=user_reaction,
+                    session=db_session,
+                    tracker=tracker,
+                )
+                await db_session.commit()
+            except Exception:
+                await _keep_flushed_traces(db_session)
+                raise
     except Exception:
         _LOG.exception("process_reaction failed; host keeps performing")
         return
@@ -697,6 +894,19 @@ async def _process_reaction_task(
         if instructions:
             await vs.update_instructions(instructions)
 
-        recovery_line = result.get("recovery_line")
-        if result.get("bombed") and recovery_line:
-            await vs.speak(recovery_line)
+        if result.get("bombed"):
+            await _speak_stall(
+                vs=vs,
+                state=session_state,
+                category="post_bomb",
+                session_id=session_state.session_id,
+                wait="reaction_bomb",
+            )
+        elif score_val >= 6:
+            await _speak_stall(
+                vs=vs,
+                state=session_state,
+                category="post_laugh",
+                session_id=session_state.session_id,
+                wait="reaction_landed",
+            )

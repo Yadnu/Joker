@@ -92,9 +92,13 @@ class JokeOut(BaseModel):
 
 
 class JokeSummaryOut(BaseModel):
-    """Minimal joke reference used inside file-detail responses."""
+    """Minimal joke reference used inside file-detail and tree responses."""
     id: str
     score: int
+    joke_text: str = ""
+    category: str = ""
+    source: str = ""
+    set: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +189,7 @@ class TreeFileOut(BaseModel):
     id: str
     label: str
     joke_count: int
+    jokes: list[JokeSummaryOut] = Field(default_factory=list)
 
 
 class TreeDrawerOut(BaseModel):

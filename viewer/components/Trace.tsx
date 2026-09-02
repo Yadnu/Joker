@@ -151,6 +151,28 @@ function TraceFooter({ steps }: { steps: TraceStep[] }) {
     <div className="mt-4 pt-3 border-t border-edge space-y-2">
       <div>
         <div className="font-mono text-[9px] uppercase tracking-widest text-lo/60 mb-1">
+          Stack
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {['Python', 'FastAPI', 'PostgreSQL', 'SQLAlchemy', 'Next.js', 'Box HTTP'].map((s) => (
+            <span key={s} className="tag">{s}</span>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="font-mono text-[9px] uppercase tracking-widest text-lo/60 mb-1">
+          Data sources
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {['OpenAI', 'ElevenLabs Conversational AI', 'Jokebox archive'].map((s) => (
+            <span key={s} className="tag-accent">{s}</span>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="font-mono text-[9px] uppercase tracking-widest text-lo/60 mb-1">
           Components
         </div>
         <div className="flex flex-wrap gap-1">
@@ -234,8 +256,11 @@ export default function Trace({ jokeId }: { jokeId: string | null }) {
 
   if (trace.steps.length === 0) {
     return (
-      <div className="p-4 font-mono text-[10px] text-lo/40 text-center mt-6">
-        No trace steps recorded.
+      <div className="p-4 font-mono text-[10px] text-lo/70 leading-relaxed mt-4">
+        No decision steps were recorded for this joke. Seed and curated rows
+        filed without <span className="text-mid">record_step</span> have no
+        trail. Live generations after filing should appear here; if they do
+        not, the step was never traced.
       </div>
     )
   }

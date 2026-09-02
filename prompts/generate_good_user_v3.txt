@@ -1,0 +1,18 @@
+TERRITORY (not a finished joke — find the specific thing inside it):
+{topic}
+
+FORM (mandatory): {form}
+ENGINE (mandatory): {engine}
+FORBIDDEN_ENGINE (used on the last bit): {last_engine}
+SHAPE (mandatory): {shape}
+LAST_SHAPE (do not repeat): {last_shape}
+ALREADY USED TONIGHT — do not reuse any of these, in any form: {avoid}
+
+Listener: {user_context}
+Style hint: {style}
+
+Find the smallest, most specific thing in that territory — the one person,
+object, brand, or number nobody else would have picked — and build the bit on
+that. Start inside the bit. Punch on the last word. Then output:
+
+FINAL: <the line>

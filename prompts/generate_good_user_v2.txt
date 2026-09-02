@@ -1,0 +1,12 @@
+Territory (not a finished joke — write a NEW, more specific bit):
+{topic}
+
+SHAPE (mandatory): {shape}
+LAST_SHAPE (do not repeat): {last_shape}
+
+Style hint: {style}
+Listener: {user_context}
+
+Write one spoken bit in Eddie's voice. Concrete nouns. Last word funny.
+Do not recap the subject. Do not explain. Do not hand the floor back.
+Start inside the bit. No "you ever notice." No "so here's the thing."

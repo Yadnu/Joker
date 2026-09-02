@@ -92,6 +92,40 @@ async def test_missing_file_returns_404_naming_level(client):
 
 
 @pytest.mark.asyncio
+async def test_get_box_embeds_joke_summaries(client):
+    """GET /box is the single tree request: each file includes joke id+score
+    so the Viewer does not fetch GET /files/{id} per expand."""
+    p = joke_payload(
+        cabinet="TreeCab", drawer="TreeDrw", file="TreeFile",
+        joke_text="Tree-embed joke.", score=8,
+    )
+    r = await client.put("/box/upsert", json=p)
+    assert r.status_code == 201
+    joke_id = r.json()["joke_id"]
+
+    r2 = await client.get("/box")
+    assert r2.status_code == 200
+    cabs = r2.json()["cabinets"]
+    tree_file = None
+    for cab in cabs:
+        if cab["label"] != "TreeCab":
+            continue
+        for drw in cab["drawers"]:
+            for fil in drw["files"]:
+                if fil["label"] == "TreeFile":
+                    tree_file = fil
+    assert tree_file is not None
+    assert tree_file["joke_count"] >= 1
+    ids = [j["id"] for j in tree_file["jokes"]]
+    assert joke_id in ids
+    match = next(j for j in tree_file["jokes"] if j["id"] == joke_id)
+    assert match["score"] == 8
+    assert match["joke_text"] == "Tree-embed joke."
+    assert match["category"] == p["joke"]["category"]
+    assert match["source"] == "generated"
+
+
+@pytest.mark.asyncio
 async def test_read_by_path_returns_jokes(client):
     """GET /box/{cabinet}/{drawer}/{file} returns jokes at that path."""
     p = joke_payload(
@@ -179,3 +213,34 @@ async def test_scoped_counts_file(client):
     r2 = await client.get(f"/files/{file_id}/counts")
     assert r2.status_code == 200
     assert r2.json()["jokes"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_put_joke_updates_landing_fields(client):
+    p = joke_payload(
+        cabinet="LandCab", drawer="LandDrw", file="LandFile",
+        joke_text="Told on stage.", score=0,
+        user_reaction="(told on stage; reaction not captured yet)",
+    )
+    r = await client.put("/box/upsert", json=p)
+    assert r.status_code == 201
+    joke_id = r.json()["joke_id"]
+
+    r2 = await client.put(
+        f"/jokes/{joke_id}",
+        json={
+            "user_reaction": "Ha!",
+            "score": 8,
+            "category": "Observational",
+            "metadata": {
+                "topic": "stage",
+                "style": "one-liner",
+                "length": "short",
+                "sensitivity_flags": [],
+            },
+        },
+    )
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert body["score"] == 8
+    assert body["user_reaction"] == "Ha!"

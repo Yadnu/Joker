@@ -56,6 +56,7 @@ the Librarian round-trip never blocks the audio relay.
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -76,9 +77,9 @@ from box.schema.records import (
     UserContext,
 )
 from joker import box_client
-from joker.generate import generate
+from joker.generate import generate, next_engine, next_shape, strip_repeated_closings
 from joker.latency import LatencyTracker, Stage
-from joker.setbuilder import JokeSet, adapt_set, build_set
+from joker.setbuilder import JokeSet, Slot, adapt_set, build_set
 from librarian.interface import (
     Angle,
     ClassificationRequest,
@@ -96,7 +97,7 @@ BOMB_THRESHOLD = 4
 
 _DEFAULT_STYLE = "one-liner"
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
-_REALTIME_TEMPLATE = (_PROMPTS_DIR / "realtime_perform_v1.txt").read_text(encoding="utf-8")
+_REALTIME_TEMPLATE = (_PROMPTS_DIR / "realtime_perform_v3.txt").read_text(encoding="utf-8")
 
 
 @dataclass
@@ -109,6 +110,9 @@ class SlotGeneration:
     intended_quality: str
     provenance: Provenance
     tone_level: int = 1
+    filed_id: str | None = None
+    shape: str | None = None
+    engine: str | None = None
 
 
 @dataclass
@@ -136,6 +140,17 @@ class SessionState:
     tone_scores: dict[int, list[int]] = field(default_factory=lambda: {1: [], 2: [], 3: []})
     # How many rerolls have been requested this session (for refusal-line rotation).
     reroll_count: int = 0
+    filing_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    last_shape: str | None = None
+    last_engine: str | None = None
+    used_stalls: set[str] = field(default_factory=set)
+    used_transitions: set[str] = field(default_factory=set)
+    # Every line already generated this session, fed back into the prompt as
+    # the avoid-list so a second request for the same form is not the same bit.
+    told_lines: list[str] = field(default_factory=list)
+    # Archive rows already handed to the host, so a lookup does not keep
+    # returning the single highest-scored joke in the genre.
+    served_joke_ids: set[str] = field(default_factory=set)
 
 
 async def start_session(
@@ -249,6 +264,8 @@ async def generate_slot(
     # Use the tone_level from the angle that backs this slot, defaulting to 1
     # for slots that were not backed by a Librarian-suggested angle.
     tone_level = _tone_for_slot(state, slot_idx)
+    shape = next_shape(last_shape=state.last_shape, slot_idx=slot_idx)
+    engine = next_engine(last_engine=state.last_engine)
     t0 = time.monotonic()
     joke_text, provenance = await generate(
         joke_id=joke_id,
@@ -259,7 +276,13 @@ async def generate_slot(
         user_context=_describe_context(state.listener_context),
         set_position=slot_idx + 1,
         session=session,
+        shape=shape,
+        last_shape=state.last_shape,
+        engine=engine,
+        last_engine=state.last_engine,
+        avoid=state.told_lines,
     )
+    joke_text = strip_repeated_closings(joke_text, state.used_transitions)
     if tracker is not None:
         tracker.record(Stage.GENERATION, int((time.monotonic() - t0) * 1000))
 
@@ -272,42 +295,166 @@ async def generate_slot(
         intended_quality=quality,
         provenance=provenance,
         tone_level=tone_level,
+        shape=shape,
+        engine=engine,
     )
+    state.last_shape = shape
+    state.last_engine = engine
+    state.told_lines.append(joke_text)
     return joke_text
 
 
-async def process_reaction(
+# Forms a listener can ask for by name. The value is what the prompt is told
+# to write; the key is what the host heard.
+REQUESTABLE_FORMS: dict[str, str] = {
+    "knock-knock": "knock-knock joke",
+    "riddle": "riddle",
+    "pun": "pun",
+    "one-liner": "one-liner",
+    "dad-joke": "dad joke",
+    "limerick": "limerick",
+    "story": "story bit",
+    "bit": "stand-up bit",
+}
+
+
+async def fresh_bit(
+    *,
+    state: SessionState,
+    session: AsyncSession,
+    topic: str,
+    form: str = "bit",
+    tracker: LatencyTracker | None = None,
+) -> dict:
+    """Write a NEW bit on request and file it. Never a recital.
+
+    The archive lookups are ordered by score, so a request for a named form
+    ("give me a knock-knock") used to return the same top-scored seeded joke
+    every time. This path generates instead, feeding every line already used
+    this session back in as the avoid-list, so a second request for the same
+    form cannot come back the same.
+    """
+    form_label = REQUESTABLE_FORMS.get(form.strip().lower(), form.strip() or "stand-up bit")
+    slot_idx = len(state.joke_set.slots)
+    joke_id = f"joke_{uuid.uuid4().hex[:12]}"
+    shape = next_shape(last_shape=state.last_shape, slot_idx=slot_idx)
+    engine = next_engine(last_engine=state.last_engine)
+    tone_level = state.angles[0].tone_level if state.angles else 1
+
+    t0 = time.monotonic()
+    joke_text, provenance = await generate(
+        joke_id=joke_id,
+        topic=topic or form_label,
+        tone_level=tone_level,
+        style=shape,
+        intended_quality="good",
+        user_context=_describe_context(state.listener_context),
+        set_position=slot_idx + 1,
+        session=session,
+        shape=shape,
+        last_shape=state.last_shape,
+        engine=engine,
+        last_engine=state.last_engine,
+        form=form_label,
+        avoid=state.told_lines,
+        candidate_count=1,
+    )
+    if tracker is not None:
+        tracker.record(Stage.GENERATION, int((time.monotonic() - t0) * 1000))
+
+    joke_text = strip_repeated_closings(joke_text, state.used_transitions)
+
+    # Give the previously-final slot a transition so the set stays valid, then
+    # append the requested bit as the new final slot.
+    if state.joke_set.slots:
+        prev = state.joke_set.slots[-1]
+        if not prev.transition_to_next.strip():
+            prev.transition_to_next = (
+                f"Listener asked for a {form_label}; the requested bit follows."
+            )
+    state.joke_set.slots.append(
+        Slot(name="bit", joke_id=joke_id, joke_text=joke_text, transition_to_next="")
+    )
+    state.generations[slot_idx] = SlotGeneration(
+        joke_id=joke_id,
+        topic=topic or form_label,
+        style=shape,
+        intended_quality="good",
+        provenance=provenance,
+        tone_level=tone_level,
+        shape=shape,
+        engine=engine,
+    )
+    state.last_shape = shape
+    state.last_engine = engine
+    state.told_lines.append(joke_text)
+
+    filed = await file_told_slot(state=state, slot_idx=slot_idx, session=session)
+    return {
+        "joke_text": joke_text,
+        "joke_id": (filed or {}).get("joke_id") or joke_id,
+        "form": form_label,
+        "engine": engine,
+        "slot_idx": slot_idx,
+    }
+
+
+def dedupe_archive_rows(
+    rows: list[dict],
+    state: SessionState,
+    limit: int | None = None,
+) -> list[dict]:
+    """Drop rows already served this session, shuffle, and mark what is handed over.
+
+    `funniest_in_genre` and `search_jokes` both order by score descending, so
+    without this the host is handed the same highest-scored joke on every
+    lookup. Only the rows actually returned are marked as served.
+    """
+    import random
+
+    fresh = [r for r in rows if str(r.get("id")) not in state.served_joke_ids]
+    if not fresh:
+        return []
+    random.shuffle(fresh)
+    served = fresh[:limit] if limit else fresh
+    for row in served:
+        state.served_joke_ids.add(str(row.get("id")))
+    return served
+
+
+TOLD_REACTION = "(told on stage; reaction not captured yet)"
+
+
+async def _relink_and_mark_filed(
+    *,
+    session: AsyncSession,
+    gen: SlotGeneration,
+    slot,
+    filed_id: str | None,
+) -> None:
+    if filed_id and gen.joke_id and filed_id != gen.joke_id:
+        await session.execute(
+            update(Trace)
+            .where(Trace.artifact_id == gen.joke_id)
+            .values(artifact_id=filed_id)
+        )
+        gen.joke_id = filed_id
+        slot.joke_id = filed_id
+    if filed_id:
+        gen.filed_id = filed_id
+
+
+async def _classify_and_upsert_slot(
     *,
     state: SessionState,
     slot_idx: int,
     user_reaction: str,
+    result_score: int,
     session: AsyncSession,
-    tracker: LatencyTracker | None = None,
+    tracker: LatencyTracker | None,
 ) -> dict:
-    """Score, classify, extract metadata, and file the joke just delivered.
-
-    Runs score() -> classify() -> extract_metadata() -> upsert_joke(), in
-    that fixed order, matching the worked example in .cursor/skills/trace.
-    If the score bombs (< BOMB_THRESHOLD), also calls adapt_set() and
-    replaces state.joke_set with the adapted set.
-
-    Returns a small summary dict for the caller (realtime.py) to log/act on.
-    """
     slot = state.joke_set.slots[slot_idx]
     gen = state.generations[slot_idx]
-    user_context_str = _describe_context(state.listener_context)
-
-    t_score = time.monotonic()
-    result_score = await score(
-        joke_id=gen.joke_id,
-        joke_text=slot.joke_text,
-        user_reaction=user_reaction,
-        user_context=user_context_str,
-        session=session,
-    )
-    if tracker is not None:
-        tracker.record(Stage.SCORING, int((time.monotonic() - t_score) * 1000))
-
     t_cls = time.monotonic()
     classification = await classify(
         ClassificationRequest(
@@ -357,17 +504,158 @@ async def process_reaction(
         tracker.record(Stage.FILING, int((time.monotonic() - t_file) * 1000))
 
     filed_id = upsert_result.get("joke_id")
-    if filed_id and gen.joke_id and filed_id != gen.joke_id:
-        await session.execute(
-            update(Trace)
-            .where(Trace.artifact_id == gen.joke_id)
-            .values(artifact_id=filed_id)
-        )
-        gen.joke_id = filed_id
-        slot.joke_id = filed_id
-
+    await _relink_and_mark_filed(
+        session=session, gen=gen, slot=slot, filed_id=filed_id
+    )
     if classification.category not in state.listener_history:
         state.listener_history.append(classification.category)
+    return {
+        "score": result_score,
+        "category": classification.category,
+        "path": list(classification.path),
+        "joke_id": filed_id,
+        "metadata": metadata,
+        "classification": classification,
+    }
+
+
+async def file_told_slot(
+    *,
+    state: SessionState,
+    slot_idx: int,
+    session: AsyncSession,
+    tracker: LatencyTracker | None = None,
+) -> dict | None:
+    """File a joke the host actually told, before (or without) a reaction.
+
+    Score is 0 until process_reaction updates the landing. Skips if this slot
+    is already in the Box so delivery and session-end flushes are idempotent.
+    """
+    if slot_idx not in state.generations:
+        return None
+    async with state.filing_lock:
+        gen = state.generations[slot_idx]
+        if gen.filed_id:
+            return {"joke_id": gen.filed_id, "already_filed": True}
+        return await _classify_and_upsert_slot(
+            state=state,
+            slot_idx=slot_idx,
+            user_reaction=TOLD_REACTION,
+            result_score=0,
+            session=session,
+            tracker=tracker,
+        )
+
+
+async def file_unfiled_slots(
+    *,
+    state: SessionState,
+    session: AsyncSession,
+) -> None:
+    """Persist every generated slot that never made it through upsert."""
+    for slot_idx in list(state.generations):
+        await file_told_slot(state=state, slot_idx=slot_idx, session=session)
+
+
+async def process_reaction(
+    *,
+    state: SessionState,
+    slot_idx: int,
+    user_reaction: str,
+    session: AsyncSession,
+    tracker: LatencyTracker | None = None,
+) -> dict:
+    """Score, classify, extract metadata, and file the joke just delivered.
+
+    Runs score() -> classify() -> extract_metadata() -> upsert_joke() (or
+    update an already-filed row if delivery already persisted the joke).
+    If the score bombs (< BOMB_THRESHOLD), also calls adapt_set() and
+    replaces state.joke_set with the adapted set.
+
+    Returns a small summary dict for the caller (realtime.py) to log/act on.
+    """
+    slot = state.joke_set.slots[slot_idx]
+    gen = state.generations[slot_idx]
+    user_context_str = _describe_context(state.listener_context)
+
+    t_score = time.monotonic()
+    result_score = await score(
+        joke_id=gen.joke_id,
+        joke_text=slot.joke_text,
+        user_reaction=user_reaction,
+        user_context=user_context_str,
+        session=session,
+    )
+    if tracker is not None:
+        tracker.record(Stage.SCORING, int((time.monotonic() - t_score) * 1000))
+
+    async with state.filing_lock:
+        t_cls = time.monotonic()
+        classification = await classify(
+            ClassificationRequest(
+                joke_text=slot.joke_text,
+                user_reaction=user_reaction,
+                taxonomy_snapshot_version=state.taxonomy_snapshot_version,
+                suggested_path=_suggested_path_for_slot(state, slot),
+            ),
+            session,
+        )
+        if tracker is not None:
+            tracker.record(Stage.CLASSIFICATION, int((time.monotonic() - t_cls) * 1000))
+
+        metadata = await extract_metadata(
+            joke_id=gen.joke_id,
+            joke_text=slot.joke_text,
+            tone_level=gen.tone_level,
+            session=session,
+        )
+
+        t_file = time.monotonic()
+        if gen.filed_id:
+            await box_client.update_joke_landing(
+                joke_id=gen.filed_id,
+                user_reaction=user_reaction,
+                score=result_score,
+                category=classification.category,
+                metadata=metadata,
+                session=session,
+                api_key=state.box_api_key,
+            )
+            upsert_result = {"joke_id": gen.filed_id}
+        else:
+            record = JokeRecord(
+                prompt_responses=[
+                    PromptTurn(role="system", content=gen.provenance.prompt),
+                    PromptTurn(role="assistant", content=slot.joke_text),
+                ],
+                joke_text=slot.joke_text,
+                user_reaction=user_reaction,
+                score=result_score,
+                category=classification.category,
+                metadata=metadata,
+                user_context=state.listener_context,
+                attribution=Attribution(joker=state.joker_name, account=state.account_name),
+                provenance=gen.provenance,
+                set_id=SetId(set=state.joke_set.set_id, position=slot_idx + 1),
+            )
+            upsert_result = await box_client.upsert_joke(
+                cabinet=classification.path[0],
+                drawer=classification.path[1],
+                file=classification.path[2],
+                record=record,
+                session=session,
+                api_key=state.box_api_key,
+            )
+        if tracker is not None:
+            tracker.record(Stage.FILING, int((time.monotonic() - t_file) * 1000))
+
+        filed_id = upsert_result.get("joke_id")
+        await _relink_and_mark_filed(
+            session=session, gen=gen, slot=slot, filed_id=filed_id
+        )
+
+        if classification.category not in state.listener_history:
+            state.listener_history.append(classification.category)
 
     # Record scored tone level so suggest() can steer future angles.
     state.tone_scores[gen.tone_level].append(result_score)
@@ -407,11 +695,11 @@ async def process_reaction(
 
 
 def render_set_instructions(state: SessionState) -> str:
-    """Fill prompts/realtime_perform_v1.txt with the current set script."""
-    lines = []
-    for i, slot in enumerate(state.joke_set.slots):
-        transition = slot.transition_to_next or "close the set"
-        lines.append(f"{i + 1}. [{slot.name}] {slot.joke_text}  (then: {transition})")
+    """Fill prompts/realtime_perform_v3.txt with the current set script."""
+    lines = [
+        f"{i + 1}. [{slot.name}] {slot.joke_text}"
+        for i, slot in enumerate(state.joke_set.slots)
+    ]
     return _REALTIME_TEMPLATE.format(set_script="\n".join(lines)).strip()
 
 
@@ -420,19 +708,20 @@ def opening_instructions() -> str:
     return (
         "You are Eddie Voss, host of The Late Word. You perform for a room. "
         "You do not serve a user. Open immediately in character. "
-        "A set script will arrive as a contextual update; until then keep the "
-        "floor. No chatbot greeting. No 'how can I help you.'"
+        "A set script will arrive as a contextual update; until then keep "
+        "talking. No chatbot greeting. No 'how can I help you.' "
+        "Never say 'your move' or 'talk to me.'"
     )
 
 
 def pick_cold_open() -> str:
-    """Rotate a spoken cold open from prompts/persona.md. No model, no Box."""
+    """Rotate a spoken cold open from prompts/persona_v3.md. No model, no Box."""
     import random
 
-    text = (_PROMPTS_DIR / "persona.md").read_text(encoding="utf-8")
+    text = (_PROMPTS_DIR / "persona_v3.md").read_text(encoding="utf-8")
     start = text.find("## COLD OPENS")
     if start < 0:
-        return "We are on. Talk to me."
+        return "Look, the lights are up, which means we have to start."
     nxt = text.find("\n## ", start + 5)
     block = text[start:nxt if nxt >= 0 else None]
     items: list[str] = []
@@ -446,17 +735,16 @@ def pick_cold_open() -> str:
             buf.append(line.strip())
     if buf:
         items.append(" ".join(buf).strip())
-    return random.choice(items) if items else "We are on. Talk to me."
+    return random.choice(items) if items else "Look, the lights are up, which means we have to start."
 
 
 _COLD_OPEN_SYSTEM = (
     "You write lines for a live stage performance. "
     "Generate 2-3 sentences for Eddie Voss to speak the instant the show begins. "
     "No stage directions, no quotation marks, no 'Hello' or 'Good evening' or 'Welcome'. "
-    "Start mid-thought or mid-observation as if he's already been in the room for a minute. "
-    "End on a line that implicitly hands the floor to the room — "
-    "a question posed to the air, or a setup that needs an audience to land. "
-    "Match his voice exactly: declarative, slightly world-weary, a few beats ahead of the room."
+    "Start mid-thought as if he's already been in the room. "
+    "Do not hand the floor back. Do not say your move, talk to me, hit me, over to you. "
+    "Keep talking. Match his sarcastic, spoken voice."
 )
 
 
@@ -470,7 +758,7 @@ async def generate_cold_open(
     variance across sessions so the opening never sounds scripted.
     Traced so the model call is on the record.
     """
-    persona_text = (_PROMPTS_DIR / "persona.md").read_text(encoding="utf-8").strip()
+    persona_text = (_PROMPTS_DIR / "persona_v3.md").read_text(encoding="utf-8").strip()
     angles_summary = "; ".join(
         f"{a.genre}/{a.topic}" for a in state.angles[:3]
     ) or "general material"
@@ -501,7 +789,7 @@ async def generate_cold_open(
         kind="generation",
         actor="joker.orchestrator",
         model="gpt-4o-mini",
-        prompt_ref="prompts/persona.md",
+        prompt_ref="prompts/persona_v3.md",
         inputs={"angles": angles_summary},
         output={"cold_open": text},
         rationale=(

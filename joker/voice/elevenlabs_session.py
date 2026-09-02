@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 from collections.abc import Awaitable, Callable
@@ -73,6 +74,8 @@ from elevenlabs.types import (
 )
 
 from joker.voice.protocol import VoiceCallbacks, VoiceSession
+
+_LOG = logging.getLogger(__name__)
 
 # Voice that best matches a late-night monologue host: assured, mid-range,
 # enough range to land a punchline.  Configurable via ELEVENLABS_VOICE_ID.
@@ -181,10 +184,45 @@ class _BrowserAudioBridge(AsyncAudioInterface):
 _EL_TOOL_CONFIGS = [
     {
         "type": "client",
+        "name": "write_fresh_bit",
+        "description": (
+            "Write a BRAND NEW bit right now, in a requested form. Call this "
+            "whenever the listener asks for a joke or for a specific kind of "
+            "joke - a knock-knock, a riddle, a pun, a one-liner, a dad joke. "
+            "Returns fresh material on every call and never repeats anything "
+            "already said this session. Perform the returned line in your own "
+            "voice. Never recite a famous joke instead of calling this."
+        ),
+        "expects_response": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": (
+                        "What the bit is about. Use whatever the listener named; "
+                        "if they named nothing, pick something specific yourself."
+                    ),
+                },
+                "form": {
+                    "type": "string",
+                    "description": (
+                        "Requested form: knock-knock, riddle, pun, one-liner, "
+                        "dad-joke, limerick, story, or bit."
+                    ),
+                },
+            },
+            "required": ["topic"],
+        },
+    },
+    {
+        "type": "client",
         "name": "funniest_in_genre",
         "description": (
-            "Return the top jokes by score for a given genre. "
-            "Use this to find proven material before deciding what to try next."
+            "Look up jokes already proven in the archive for a genre, to choose "
+            "what territory to try next. Excludes anything already used this "
+            "session. Do NOT use this to answer a request for a joke - call "
+            "write_fresh_bit for that."
         ),
         "expects_response": True,
         "parameters": {
@@ -287,6 +325,15 @@ async def _ensure_tools(client: ElevenLabs) -> list[str]:
         name = cfg["name"]
         if name in existing:
             ids.append(existing[name])
+            # Push the local description/parameters over the stored copy, or a
+            # tool created by an earlier build keeps its stale instructions.
+            try:
+                client.conversational_ai.tools.update(
+                    tool_id=existing[name],
+                    tool_config=cfg,  # type: ignore[arg-type]
+                )
+            except Exception:
+                _LOG.debug("could not refresh ElevenLabs tool %s", name)
             continue
         try:
             tool = client.conversational_ai.tools.create(
@@ -573,7 +620,7 @@ def _make_client_tools(
     """
     client_tools = ClientTools()
 
-    for tool_name in ("funniest_in_genre", "get_thin_genres", "get_recent_scores", "search_jokes"):
+    for tool_name in (cfg["name"] for cfg in _EL_TOOL_CONFIGS):
         # Create a closure binding the tool_name
         def _make_handler(name: str) -> Callable[[dict], Awaitable[Any]]:
             async def _handler(params: dict) -> Any:

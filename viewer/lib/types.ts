@@ -118,6 +118,7 @@ export interface TreeFile {
   id: string
   label: string
   joke_count: number
+  jokes: JokeSummary[]
 }
 
 export interface TreeDrawer {
@@ -159,6 +160,10 @@ export interface ComplianceData {
 export interface JokeSummary {
   id: string
   score: number
+  joke_text?: string
+  category?: string
+  source?: string
+  set?: string
 }
 
 export interface FileDetail {

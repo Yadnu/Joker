@@ -13,5 +13,6 @@ from shared.box_client import (  # noqa: F401
     recent_scores,
     search_jokes,
     taxonomy,
+    update_joke_landing,
     upsert_joke,
 )
