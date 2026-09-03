@@ -77,7 +77,13 @@ from box.schema.records import (
     UserContext,
 )
 from joker import box_client
-from joker.generate import generate, next_engine, next_shape, strip_repeated_closings
+from joker.generate import (
+    generate,
+    next_engine,
+    next_few_shot_shape,
+    next_shape,
+    strip_repeated_closings,
+)
 from joker.latency import LatencyTracker, Stage
 from joker.setbuilder import JokeSet, Slot, adapt_set, build_set
 from librarian.interface import (
@@ -89,7 +95,14 @@ from librarian.interface import (
     score,
     suggest,
 )
-from shared.trace import record_step
+from shared.trace import (
+    bind_from_generation,
+    bind_turn,
+    current_turn,
+    opening_trigger_type,
+    record_step,
+    stamp_generation,
+)
 
 # A bit that scores below this is treated as "bombed" and triggers
 # joker.setbuilder.adapt_set() — see FIX 1 item 5 / AGENTS.md.
@@ -113,6 +126,11 @@ class SlotGeneration:
     filed_id: str | None = None
     shape: str | None = None
     engine: str | None = None
+    few_shot_shape: str | None = None
+    turn_id: str | None = None
+    turn_index: int | None = None
+    trigger_type: str | None = None
+    trigger_text: str | None = None
 
 
 @dataclass
@@ -151,6 +169,24 @@ class SessionState:
     # Archive rows already handed to the host, so a lookup does not keep
     # returning the single highest-scored joke in the genre.
     served_joke_ids: set[str] = field(default_factory=set)
+    last_few_shot_shape: str | None = None
+    critique_buffer: list[dict] = field(default_factory=list)
+    turn_index: int = 0
+
+
+def advance_turn(
+    state: SessionState,
+    trigger_type: str,
+    trigger_text: str | None = None,
+):
+    """Start a new turn; every later record_step in this task inherits it."""
+    state.turn_index += 1
+    return bind_turn(
+        turn_id=f"{state.session_id}:t{state.turn_index}",
+        turn_index=state.turn_index,
+        trigger_type=trigger_type,
+        trigger_text=trigger_text,
+    )
 
 
 async def start_session(
@@ -172,6 +208,13 @@ async def start_session(
     """
     history = list(listener_history or [])
 
+    bind_turn(
+        turn_id=f"{session_id}:t1",
+        turn_index=1,
+        trigger_type=opening_trigger_type(session_id),
+        trigger_text=None,
+    )
+
     t0 = time.monotonic()
     suggestion = await suggest(
         SuggestionRequest(
@@ -179,6 +222,7 @@ async def start_session(
             listener_history=history,
             taxonomy_snapshot_version=taxonomy_snapshot_version,
             preferred_tone_level=None,  # no session data yet
+            recent_critiques=[],
         ),
         session,
     )
@@ -236,6 +280,7 @@ async def start_session(
         angles=suggestion.angles,
         joke_set=joke_set,
         listener_history=history,
+        turn_index=1,
     )
 
 
@@ -266,6 +311,7 @@ async def generate_slot(
     tone_level = _tone_for_slot(state, slot_idx)
     shape = next_shape(last_shape=state.last_shape, slot_idx=slot_idx)
     engine = next_engine(last_engine=state.last_engine)
+    few_shot_shape = next_few_shot_shape(last_few_shot_shape=state.last_few_shot_shape)
     t0 = time.monotonic()
     joke_text, provenance = await generate(
         joke_id=joke_id,
@@ -281,6 +327,9 @@ async def generate_slot(
         engine=engine,
         last_engine=state.last_engine,
         avoid=state.told_lines,
+        few_shot_shape=few_shot_shape,
+        last_few_shot_shape=state.last_few_shot_shape,
+        recent_critiques=state.critique_buffer,
     )
     joke_text = strip_repeated_closings(joke_text, state.used_transitions)
     if tracker is not None:
@@ -297,9 +346,12 @@ async def generate_slot(
         tone_level=tone_level,
         shape=shape,
         engine=engine,
+        few_shot_shape=few_shot_shape,
     )
     state.last_shape = shape
     state.last_engine = engine
+    state.last_few_shot_shape = few_shot_shape
+    stamp_generation(state.generations[slot_idx])
     state.told_lines.append(joke_text)
     return joke_text
 
@@ -335,10 +387,18 @@ async def fresh_bit(
     form cannot come back the same.
     """
     form_label = REQUESTABLE_FORMS.get(form.strip().lower(), form.strip() or "stand-up bit")
+    advance_turn(
+        state,
+        opening_trigger_type(state.session_id)
+        if opening_trigger_type(state.session_id) == "query_slot"
+        else "user_request",
+        topic or form_label,
+    )
     slot_idx = len(state.joke_set.slots)
     joke_id = f"joke_{uuid.uuid4().hex[:12]}"
     shape = next_shape(last_shape=state.last_shape, slot_idx=slot_idx)
     engine = next_engine(last_engine=state.last_engine)
+    few_shot_shape = next_few_shot_shape(last_few_shot_shape=state.last_few_shot_shape)
     tone_level = state.angles[0].tone_level if state.angles else 1
 
     t0 = time.monotonic()
@@ -358,6 +418,9 @@ async def fresh_bit(
         form=form_label,
         avoid=state.told_lines,
         candidate_count=1,
+        few_shot_shape=few_shot_shape,
+        last_few_shot_shape=state.last_few_shot_shape,
+        recent_critiques=state.critique_buffer,
     )
     if tracker is not None:
         tracker.record(Stage.GENERATION, int((time.monotonic() - t0) * 1000))
@@ -384,9 +447,12 @@ async def fresh_bit(
         tone_level=tone_level,
         shape=shape,
         engine=engine,
+        few_shot_shape=few_shot_shape,
     )
     state.last_shape = shape
     state.last_engine = engine
+    state.last_few_shot_shape = few_shot_shape
+    stamp_generation(state.generations[slot_idx])
     state.told_lines.append(joke_text)
 
     filed = await file_told_slot(state=state, slot_idx=slot_idx, session=session)
@@ -473,7 +539,10 @@ async def _classify_and_upsert_slot(
         joke_text=slot.joke_text,
         tone_level=gen.tone_level,
         session=session,
+        shape=gen.few_shot_shape or "",
+        critique=classification.critique,
     )
+    _remember_critique(state, result_score, gen.few_shot_shape, classification.critique)
 
     record = JokeRecord(
         prompt_responses=[
@@ -535,6 +604,7 @@ async def file_told_slot(
         return None
     async with state.filing_lock:
         gen = state.generations[slot_idx]
+        bind_from_generation(gen)
         if gen.filed_id:
             return {"joke_id": gen.filed_id, "already_filed": True}
         return await _classify_and_upsert_slot(
@@ -576,6 +646,8 @@ async def process_reaction(
     """
     slot = state.joke_set.slots[slot_idx]
     gen = state.generations[slot_idx]
+    if current_turn() is None:
+        bind_from_generation(gen)
     user_context_str = _describe_context(state.listener_context)
 
     t_score = time.monotonic()
@@ -608,7 +680,10 @@ async def process_reaction(
             joke_text=slot.joke_text,
             tone_level=gen.tone_level,
             session=session,
+            shape=gen.few_shot_shape or "",
+            critique=classification.critique,
         )
+        _remember_critique(state, result_score, gen.few_shot_shape, classification.critique)
 
         t_file = time.monotonic()
         if gen.filed_id:
@@ -818,6 +893,8 @@ async def _steer_remaining(
     if not remaining_idx:
         return False
 
+    advance_turn(state, "set_continuation", None)
+
     t0 = time.monotonic()
     suggestion = await suggest(
         SuggestionRequest(
@@ -825,6 +902,7 @@ async def _steer_remaining(
             listener_history=state.listener_history,
             taxonomy_snapshot_version=state.taxonomy_snapshot_version,
             preferred_tone_level=_preferred_tone(state),
+            recent_critiques=list(state.critique_buffer),
         ),
         session,
     )
@@ -868,6 +946,18 @@ async def _steer_remaining(
         session=session,
     )
     return True
+
+
+def _remember_critique(
+    state: SessionState,
+    score: int,
+    shape: str | None,
+    critique: str,
+) -> None:
+    state.critique_buffer.append(
+        {"score": score, "shape": shape or "unknown", "critique": critique}
+    )
+    state.critique_buffer = state.critique_buffer[-5:]
 
 
 def _quality_for_slot(state: SessionState, slot_name: str) -> str:

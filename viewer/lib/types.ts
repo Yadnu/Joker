@@ -60,6 +60,8 @@ export interface JokeMetadata {
   sensitivity_flags: HumorStyle[]
   theme_flags: ThemeFlag[]
   tone_level: number
+  shape?: string
+  critique?: string
 }
 
 export interface UserContext {
@@ -188,6 +190,10 @@ export interface TraceStep {
   inputs: Record<string, unknown>
   output: Record<string, unknown>
   cost?: number | null
+  trigger_type?: string | null
+  trigger_text?: string | null
+  turn_id?: string | null
+  turn_index?: number | null
 }
 
 export interface TraceData {
@@ -284,6 +290,10 @@ export interface LibrarianStepEvent {
   rationale: string
   payload: Record<string, unknown>
   joke_id: string | null
+  trigger_type?: string | null
+  trigger_text?: string | null
+  turn_id?: string | null
+  turn_index?: number | null
 }
 
 /** Current set position — which bit is up and how many total. */

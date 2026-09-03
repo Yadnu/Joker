@@ -77,6 +77,10 @@ export interface LibrarianCard {
   payload: Record<string, unknown>
   joke_id: string | null
   arrivedAt: number
+  trigger_type?: string | null
+  trigger_text?: string | null
+  turn_id?: string | null
+  turn_index?: number | null
 }
 
 export interface SetPosition {
@@ -306,6 +310,10 @@ export function useShowSession(opts?: { onSessionEnd?: () => void }): ShowSessio
             payload: event.payload,
             joke_id: event.joke_id,
             arrivedAt: Date.now(),
+            trigger_type: event.trigger_type ?? null,
+            trigger_text: event.trigger_text ?? null,
+            turn_id: event.turn_id ?? null,
+            turn_index: event.turn_index ?? null,
           },
         ])
         break

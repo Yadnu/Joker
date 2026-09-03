@@ -94,3 +94,7 @@ async def test_record_step_writes_traces_table(db):
     assert rows[0].rationale.startswith("Selected the sharpest")
     assert rows[0].kind == "generation"
     assert rows[0].actor == "joker.generate"
+    assert rows[0].trigger_type is None
+    assert rows[0].trigger_text is None
+    assert rows[0].turn_id is None
+    assert rows[0].turn_index is None

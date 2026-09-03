@@ -13,6 +13,16 @@ from box.schema.records import UserContext
 
 INTERFACE_VERSION = "1.0"
 
+# Few-shot joke turns (independent of spoken JOKE_SHAPES / engines).
+FEW_SHOT_SHAPES: tuple[str, ...] = (
+    "reversal",
+    "literalism",
+    "definition",
+    "wrong-detail",
+    "compression",
+    "misdirect",
+)
+
 
 def assert_compatible_version(version: str) -> None:
     """Reject requests stamped with a different contract version."""
@@ -56,6 +66,10 @@ class SuggestionRequest(BaseModel):
             "The tone level that has scored highest for this listener so far. "
             "None until at least one scored joke exists in the session."
         ),
+    )
+    recent_critiques: list[dict] = Field(
+        default_factory=list,
+        description="Last five {score, shape, critique} rows from this session.",
     )
 
 
@@ -147,6 +161,13 @@ class ClassificationResponse(BaseModel):
         min_length=3,
         description="[cabinet_label, drawer_label, file_label].",
     )
+    critique: str = Field(
+        default="",
+        description=(
+            "One sentence, max twenty words, naming one mechanism. "
+            "Does not replace score."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +215,16 @@ async def extract_metadata(
     joke_text: str,
     tone_level: int = 1,
     session: object,
+    shape: str = "",
+    critique: str = "",
 ):
     from librarian.metadata import extract_metadata as _extract
 
-    return await _extract(joke_id=joke_id, joke_text=joke_text, tone_level=tone_level, session=session)
+    return await _extract(
+        joke_id=joke_id,
+        joke_text=joke_text,
+        tone_level=tone_level,
+        session=session,
+        shape=shape,
+        critique=critique,
+    )

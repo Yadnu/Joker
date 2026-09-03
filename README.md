@@ -217,7 +217,7 @@ Field names are fixed in `box/schema/records.py`.
 | `user_reaction` | What the listener did, stored **apart** from the joke because it is a response to the joke, not part of it |
 | `score` | Integer 0-10 from the Librarian rubric |
 | `category` | Genre label assigned by the Librarian (must not be "General") |
-| `metadata` | Topic, style, length, sensitivity flags, theme flags, tone level |
+| `metadata` | Topic, style, length, sensitivity flags, theme flags, tone level; optional `shape` and `critique` on newer rows |
 | `user_context` | Light, non-identifying listener snapshot (age band, region, occupation field, preferences, energy) |
 | `attribution` | `joker` plus `account` (account filled from the bearer, not the body) |
 | `provenance` | `generated` or `curated`, model, prompt, selection rationale |
@@ -230,7 +230,7 @@ The typed contract is `librarian/interface.py` (version `1.0`). Facades: `sugges
 - Librarian → Joker: ranked `Angle`s (genre, topic, rationale, freshness, tone) **before** generation; after a bit, a `ClassificationResponse` (category, `is_new`, justification, three-label path) and an integer score.
 - Joker → Librarian: `SuggestionRequest` (listener context, history, taxonomy snapshot, preferred tone); `ClassificationRequest` (joke text, reaction, suggested path, snapshot).
 
-The Joker does not import Librarian internals. The Librarian does not import `joker.*`. Box I/O from the Joker goes through `shared/box_client.py` (`BOX_BASE_URL`). The Librarian may read the same database in-process for suggestion and taxonomy.
+The Librarian does not import `joker.*`. Box I/O from the Joker goes through `shared/box_client.py` (`BOX_BASE_URL`). Suggestion and taxonomy reads may use that client in-process. **Exception (not the intended seam):** `joker/generate.py` currently imports `librarian.critique` for few-shot shape names and room-feedback formatting. Classify still writes new File rows with SQL (`_create_category`) instead of HTTP.
 
 ### Voice loop
 
@@ -262,7 +262,9 @@ Recovery line on that set stays inside the vegetable theme and admits the miss.
 
 `shared/trace.py` `record_step` is keyword-only. `rationale` has **no default**. A model call that skips this module does not exist for grading.
 
-Traces persist on the Box. `GET /jokes/{joke_id}/trace` is joke-scoped. `GET /traces/{artifact_id}` is any artifact (joke, set, category, session). The Viewer Trace panel renders kind, actor, model, latency, and rationale.
+New rows also copy a **turn** from a process-local context (`bind_turn`): `trigger_type` (`cold_open`, `user_request`, `set_continuation`, `reroll`, `barge_in_recovery`, `query_slot`), `trigger_text` (verbatim listener line, or null for cold open / set continuation), `turn_id`, `turn_index`. Historical rows stay **null**. Nothing is backfilled.
+
+Traces persist on the Box. `GET /jokes/{joke_id}/trace` is joke-scoped. `GET /traces/{artifact_id}` is any artifact (joke, set, category, session). The Viewer Trace panel renders kind, actor, model, latency, and rationale, **grouped by turn** when those fields are present.
 
 ## 5. The Viewer
 
@@ -275,8 +277,9 @@ Client-only Next.js App Router. No `app/api` routes. No server actions for data.
 | http://localhost:3000/viewer?joke=`<id>` | Same archive, that joke selected |
 
 - **Tree:** one `GET /box`. Counts on cabinets, drawers, files, jokes. Compliance marks on violating nodes; summary bar names how many and where (`GET /compliance`). The browse tree hides seed-script / RaceCab rows; the compliance bar does **not** hide them.
-- **Joke detail:** one screen, no tabs: path, genre, `joke_text`, `prompt_responses`, score, `user_reaction`, set id and position, metadata, user_context, attribution, provenance.
-- **Trace:** steps for the selected joke (`GET /jokes/{id}/trace`), including rationale.
+- **Joke detail:** one screen, no tabs: path, genre, `joke_text`, `prompt_responses`, score, `user_reaction`, set id and position, metadata (including tone, and `shape` / `critique` when stored), user_context, attribution, provenance. A “What prompted this” block repeats the turn trigger above the dialogue.
+- **Trace:** steps for the selected joke (`GET /jokes/{id}/trace`), including rationale, grouped under turn headers (`cold_open`, `user_request`, …). Unrecorded historical steps render as an unrecorded group, not an error.
+- There is **no** `GET /tree`. The tree is `GET /box`. OpenAPI lists HTTP routes; it does **not** list `WS /ws/session/{session_id}`.
 - **Exports:** current joke JSON, current joke CSV, whole library JSON, whole library CSV (`GET /export` for the library). Nested fields in CSV are JSON strings.
 - **Query Slot:** on `/viewer`, a mic control that opens a voice session. You speak; audio and transcript come back; a filed joke id on `librarian_step` selects that joke (and its trace) without leaving the page. A session that never files a Box UUID will not open a trace. Treat a live Query Slot pass as part of the demo, not as something this README can guarantee from a curl.
 
@@ -298,7 +301,9 @@ Defaults are in `shared/models.py`. Any name can be overridden by an environment
 
 Full topography, including rows we **did** and **did not** measure: `docs/TOPOGRAPHY.md`.
 
-Measured on live sessions (model/HTTP stages, not TTS): generation often ~1.2-2.5s p50; suggestion ~5-7s; classification ~7-10s; scoring ~1.2-1.8s; filing ~1.2-2.5s. **`tts_first_byte` is recorded as 0** in that file because the tracker currently writes zero on delivery start. Click-to-first-audio-byte has not been measured. Do not treat those zeros as latency.
+Measured on live sessions (model/HTTP stages, not TTS): generation often ~1.2-2.5s p50; suggestion ~5-7s; classification ~7-10s; scoring ~1.2-1.8s; filing ~1.2-2.5s. **`tts_first_byte` is recorded as 0** in that file because the tracker currently writes zero on delivery start. A live show log on this machine recorded `[timing] first_audio_byte +8081ms` from WebSocket accept, which is **not** click-to-first-byte. Do not treat the zeros as latency.
+
+Comedy prompts: few-shot shapes in `prompts/shapes_v1.md` (also appended on `persona.md` / `persona_v4.md`). Score rubric **1.1** is stored on scoring traces as `inputs.rubric_version`. Classify writes a `critique` mechanism sentence onto `metadata.critique`. Session `critique_buffer` is fed back into generate and suggest.
 
 ## 7. API reference
 
@@ -332,7 +337,20 @@ Measured on live sessions (model/HTTP stages, not TTS): generation often ~1.2-2.
 | POST | `/joker/reroll` | Darker replacement (or ceiling refusal) |
 | WS | `/ws/session/{session_id}` | Full-duplex voice (not in OpenAPI) |
 
-Live reads this session: `/health`, `/docs`, `/counts`, `/compliance`, `/box`, `/jokes/{id}`, `/traces/{id}`, `/export`, `/openapi.json`.
+Live reads this session (Box on `127.0.0.1:8000`, 2026-09-03):
+
+| Request | Result |
+|---------|--------|
+| `GET /health` | 200 `{"status":"ok"}` |
+| `GET /counts` | 200 `{"cabinets":3,"drawers":6,"files":19,"jokes":86}` |
+| `GET /compliance` | 200, `compliant: false`, **4** file-level violations (listed in section 9) |
+| `GET /docs` | 200, 1006 bytes |
+| `GET /openapi.json` | 200, 33487 bytes; paths include `/box`, `/traces/{artifact_id}`, `/joker/reroll`; **no** `/tree` |
+| `GET /accounts` | 200, 23 accounts, **no** `api_key` fields |
+| `GET /export` | 200, **230150** bytes |
+| `GET /jokes/e14feb8f-ed39-4ee9-af81-b34934f1f12d` | 200, 3628 bytes |
+| `GET /jokes/…/trace` (same id) | 200, 20335 bytes |
+| `GET /traces/set_897ff40d3d17` | 200, 6672 bytes |
 
 ### Worked example
 
@@ -410,7 +428,7 @@ curl -s http://127.0.0.1:8000/jokes/<joke-uuid>
 
 Expected **200**. Top-level keys match a live `GET /jokes/{id}` on this Box: `id`, `file_id`, `account_id`, plus the ten record fields. `attribution.account` is the **account name from the bearer**, not `spoofed-should-not-stick`. Round-trip of those fields is what `box/tests/test_write.py` asserts.
 
-Live GET example (real row, not the curl above): `GET /jokes/dc9387b4-1cf9-4985-b310-e7a50ceafa5b` returned 200, 2014 bytes, those same keys, `attribution.account` = `Yadneya`.
+Live GET example (real generated row, not the curl above): `GET /jokes/e14feb8f-ed39-4ee9-af81-b34934f1f12d` returned 200, 3628 bytes. Keys: `id`, `file_id`, `account_id`, plus the ten record fields. `attribution.account` = `YAJ` (bearer account name). `joke_text` is a generated line; `provenance.source` = `generated`; `metadata.shape` = `misdirect`; `metadata.critique` is populated; `user_context` age/region/energy are **null** (empty listener snapshot). `category` on this row is the path string `Observational > Social > Restaurants`, not only the file label.
 
 ## 8. Tests
 
@@ -418,7 +436,7 @@ Live GET example (real row, not the curl above): `GET /jokes/dc9387b4-1cf9-4985-
 python -m pytest -q
 ```
 
-Run just now: **98 passed, 1 failed** in 68.28s.
+Run on this machine (2026-09-03): **109 passed, 1 failed** in 73.54s.
 
 The failure is `box/tests/test_joker_realtime.py::test_barge_in_cancels_and_traces`, which still asserts the retired OpenAI Realtime snapshot `gpt-4o-realtime-preview-2024-12-17`. Default voice traces `elevenlabs-convai`. Cancel, ack, and `interrupted: true` are still asserted.
 
@@ -433,7 +451,7 @@ The failure is `box/tests/test_joker_realtime.py::test_barge_in_cancels_and_trac
 | `test_concurrency.py` | Two threads, same path, no duplicate levels |
 | `test_auth.py` | Bearer on writes; attribution from account; reads open |
 | `test_accounts.py` | Create, 409, no key on GET, global visibility |
-| `test_trace.py` / `test_router_traces.py` | `record_step` and HTTP trace reads |
+| `test_trace.py` / `test_trace_turns.py` / `test_router_traces.py` | `record_step`, turn/trigger copy, HTTP trace reads |
 | `test_librarian_*.py` | suggest / classify / score / interface |
 | `test_joker_*.py` | generate, setbuilder, tools, stalls, fresh bit, orchestrator, latency, box client |
 | `test_joker_realtime.py` | Barge-in cancel + trace (currently fails on model string) |
@@ -446,35 +464,42 @@ The failure is `box/tests/test_joker_realtime.py::test_barge_in_cancels_and_trac
 - Tree, joke detail, trace panel, four export buttons, live show at `/`
 - Separate suggest / generate / score / classify (and metadata) model calls
 - Set construction with stored transitions; bomb path calls `adapt_set`
-- Traces with required rationales, persisted, readable over HTTP
+- Traces with required rationales, persisted, readable over HTTP; new steps carry turn/trigger fields
 - ElevenLabs duplex session plus tools (`funniest_in_genre`, `write_fresh_bit`)
+- Tags `milestone-1` and `milestone-2` exist locally and on `origin`
 
 **Partial**
 
 - Query Slot is implemented on `/viewer`; it is not proven in this document by a live spoken round-trip
-- `tts_first_byte` in `docs/TOPOGRAPHY.md` is 0; first audio byte is not measured
-- Barge-in is traced as `delivery`, not `kind=barge_in`
-- Many generated jokes have empty `user_context` and placeholder reactions until a landing is patched
-- `Joke.category` sometimes stores a cabinet name rather than the file label
-- Filed `set_id` values include bags `seed-set` and `restored-from-traces`; per-slot transitions live on `set_construction` traces such as `set_cfd2bb0b3634`
-- Intended-bad generation exists in code; the archive barely shows it
+- `tts_first_byte` in `docs/TOPOGRAPHY.md` is 0; first audio from WS accept was logged at +8081ms on one session, not click-to-audio
+- Barge-in is traced as `delivery`, not `kind=barge_in`; no `reroll` / `reroll_refused` rows in the live trace table at last audit
+- Many generated jokes have empty `user_context` and score **0** until a reaction is scored
+- `Joke.category` sometimes stores a path string rather than the file label
+- Filed `set_id` values include bags `seed-set` and `restored-from-traces`; per-slot transitions live on `set_construction` traces
+- Intended-bad generation exists in code; recent generation traces on this Box used `gpt-4o` (often `GENERATE_GOOD` in `.env`), not `o3`
 - `docs/TOPOGRAPHY.md` is a latency table, not the full model/cost/set essay
-- OpenAPI omits the WebSocket
-- README expected test count used to say 40; the live count is 98 + 1 fail
+- OpenAPI omits the WebSocket; there is no `/tree` path
+- `joker/generate.py` imports `librarian.critique` (seam exception above)
+- Pytest: **109 passed, 1 failed** (barge-in model string)
 
 **Cut / not claimed**
 
 - No committed raw audio (by design)
-- No `milestone-2` git tag at the time of writing (only `milestone-1`)
 - Seed inflation is not used to hide a thin live archive
 
 **Archive as of `GET /counts` and `GET /compliance` this session**
 
-- 3 cabinets, 6 drawers, 16 files, **52 jokes**
-- 16 file-level genres; 11 distinct `Joke.category` strings (labels drift; see Partial)
-- **1 compliance violation:** `DarkHumor > Absurdist > Existential` has 1 joke. That number is **correct**. The seed (and the restore after a prune) left that file thin on purpose so the validator still has something real to report. Do not "fix" it by weakening the checker.
+- 3 cabinets, 6 drawers, **19** files, **86** jokes
+- **4 compliance violations**, all file-level. The number is **correct**. Do not weaken the checker.
 
-Of the 52, 24 are curated seed (`set=seed-set`) and 28 are generated rows that were restored from traces after an archive prune. Milestone 2 still wants live session material; the restore is disclosed, not hidden.
+| Path | Jokes |
+|------|------:|
+| `Observational > Everyday Life > Money & Finance` | 0 |
+| `Observational > Everyday Life > Shopping & Retail` | 0 |
+| `Observational > Everyday Life > Health & Medicine` | 0 |
+| `DarkHumor > Absurdist > Existential` | 1 |
+
+Split from a live SQL pass (not `GET /counts`): **62** `provenance.source=generated`, **24** `curated` / `set=seed-set`. Remaining generated rows include live `set_*` ids and some `restored-from-traces`. Git tags: `milestone-1`, `milestone-2`.
 
 ## 10. Project structure
 

@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchTrace } from '@/lib/api'
 import type { TraceStep } from '@/lib/types'
+import { groupByTurn } from '@/lib/turns'
+import TurnHeader from '@/components/TurnHeader'
 
 // ---------------------------------------------------------------------------
 // Kind → accent colour mapping (left-rule)
@@ -69,7 +71,7 @@ function TraceCard({ step, index }: { step: TraceStep; index: number }) {
       >
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="font-mono text-[9px] text-lo/40 w-4 text-right shrink-0">
-            {index}
+            {String(index).padStart(2, '0')}
           </span>
           <span className={`font-mono text-[9px] font-bold uppercase tracking-wider ${kindColor}`}>
             {step.kind}
@@ -270,12 +272,43 @@ export default function Trace({ jokeId }: { jokeId: string | null }) {
       <div className="section-label mb-3">
         Decision trace — {trace.steps.length} step{trace.steps.length !== 1 ? 's' : ''}
       </div>
-      <div className="space-y-3">
-        {trace.steps.map((step, i) => (
-          <TraceCard key={step.id} step={step} index={i + 1} />
-        ))}
-      </div>
+      <TurnList steps={trace.steps} />
       <TraceFooter steps={trace.steps} />
+    </div>
+  )
+}
+
+function TurnList({ steps }: { steps: TraceStep[] }) {
+  const groups = groupByTurn(steps)
+  const lastKey = groups.at(-1)?.key
+  const [open, setOpen] = useState<Record<string, boolean>>({})
+
+  return (
+    <div className="space-y-4">
+      {groups.map((group) => {
+        const expanded = open[group.key] ?? group.key === lastKey
+        return (
+          <div key={group.key} className="border-b border-edge/40 pb-3 last:border-0">
+            <TurnHeader
+              group={group}
+              open={expanded}
+              onToggle={() =>
+                setOpen((prev) => ({
+                  ...prev,
+                  [group.key]: !(prev[group.key] ?? group.key === lastKey),
+                }))
+              }
+            />
+            {expanded && (
+              <div className="space-y-3 mt-2">
+                {group.items.map((step, i) => (
+                  <TraceCard key={step.id} step={step} index={i + 1} />
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

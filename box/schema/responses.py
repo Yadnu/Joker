@@ -116,6 +116,10 @@ class TraceStepOut(BaseModel):
     inputs: dict = Field(default_factory=dict)
     output: dict = Field(default_factory=dict)
     cost: float | None = None
+    trigger_type: str | None = None
+    trigger_text: str | None = None
+    turn_id: str | None = None
+    turn_index: int | None = None
 
 
 class TraceOut(BaseModel):

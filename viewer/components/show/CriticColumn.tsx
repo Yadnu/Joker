@@ -6,9 +6,11 @@
  * Cool, monospaced, clinical — explicit contrast with the Stage.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import LibrarianCard from './LibrarianCard'
 import CriticFigure from './CriticFigure'
+import TurnHeader from '@/components/TurnHeader'
+import { groupByTurn } from '@/lib/turns'
 import type { LibrarianCard as LibrarianCardType } from '@/lib/useShowSession'
 
 interface Props {
@@ -113,14 +115,42 @@ export default function CriticColumn({ cards, isSessionActive, isWriting, scoreR
             )}
           </div>
         ) : (
-          <div className="px-3 py-3 space-y-2">
-            {cards.map(card => (
-              <LibrarianCard key={card.id} card={card} />
-            ))}
+          <div className="px-3 py-3 space-y-4">
+            <LiveTurnFeed cards={cards} />
             <div ref={bottomRef} />
           </div>
         )}
       </div>
     </aside>
+  )
+}
+
+function LiveTurnFeed({ cards }: { cards: LibrarianCardType[] }) {
+  const groups = groupByTurn(cards)
+  const lastKey = groups.at(-1)?.key
+  const [open, setOpen] = useState<Record<string, boolean>>({})
+
+  return (
+    <div className="space-y-4">
+      {groups.map((group) => {
+        const expanded = open[group.key] ?? group.key === lastKey
+        return (
+          <div key={group.key} className="space-y-2">
+            <TurnHeader
+              group={group}
+              open={expanded}
+              onToggle={() =>
+                setOpen((prev) => ({
+                  ...prev,
+                  [group.key]: !(prev[group.key] ?? group.key === lastKey),
+                }))
+              }
+            />
+            {expanded &&
+              group.items.map((card) => <LibrarianCard key={card.id} card={card} />)}
+          </div>
+        )
+      })}
+    </div>
   )
 }

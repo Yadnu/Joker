@@ -57,7 +57,13 @@ from joker.tools import dispatch_tool
 from joker.stalls import pick_stall
 from joker.voice import VoiceCallbacks, make_voice_session
 from shared.db import session_maker
-from shared.trace import record_step
+from shared.trace import (
+    bind_from_generation,
+    bind_turn,
+    current_turn,
+    current_turn_fields,
+    record_step,
+)
 
 _LOG = logging.getLogger(__name__)
 
@@ -82,7 +88,10 @@ async def _emit(ws: WebSocket, event: dict) -> None:
     """Send a typed custom event to the client WebSocket.
 
     Silently swallows send errors so the relay hot-path is never blocked.
+    librarian_step events carry the same turn/trigger fields as the Trace row.
     """
+    if event.get("type") == "librarian_step":
+        event = {**current_turn_fields(), **event}
     try:
         await ws.send_json(event)
     except Exception:
@@ -168,6 +177,9 @@ async def _file_told_task(
     client_ws: WebSocket,
 ) -> None:
     """Classify and upsert a delivered (or cut) joke so the archive is not empty."""
+    gen = session_state.generations.get(slot_idx)
+    if gen is not None:
+        bind_from_generation(gen)
     try:
         factory = session_maker()
         async with factory() as db_session:
@@ -310,6 +322,8 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
             if session_state is not None and current_slot_idx < len(session_state.joke_set.slots):
                 delivered_slot = session_state.joke_set.slots[current_slot_idx]
                 gen = session_state.generations.get(current_slot_idx)
+            if gen is not None:
+                bind_from_generation(gen)
             _spawn(background_tasks, _isolated_record_step(
                 artifact_id=(gen.joke_id if gen else session_id),
                 artifact_type="joke" if gen else "session",
@@ -436,6 +450,9 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
                 if vs is not None:
                     await vs.speak(BARGE_IN_ACK)
 
+            if session_state is not None:
+                orchestrator.advance_turn(session_state, "barge_in_recovery", None)
+
             await handle_speech_started(
                 session_id=session_id,
                 session=None,
@@ -469,6 +486,22 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
             skip_file = interrupted_current
             interrupted_current = False
 
+            session_state = state_box[0]
+            if (
+                not skip_file
+                and session_state is not None
+                and current_slot_idx in session_state.generations
+            ):
+                gen_for_turn = session_state.generations[current_slot_idx]
+                if gen_for_turn.trigger_type:
+                    orchestrator.advance_turn(
+                        session_state,
+                        gen_for_turn.trigger_type,
+                        gen_for_turn.trigger_text,
+                    )
+                else:
+                    bind_from_generation(gen_for_turn)
+
             _spawn(background_tasks, _isolated_record_step(
                 artifact_id=session_id,
                 artifact_type="session",
@@ -493,7 +526,6 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
             tracker.record(Stage.REACTION, 0)
             await _emit(websocket, {"type": "session_state", "state": "idle"})
 
-            session_state = state_box[0]
             if (
                 not skip_file
                 and session_state is not None
@@ -676,6 +708,7 @@ async def voice_session(websocket: WebSocket, session_id: str) -> None:
                                             "tone_level": gen.tone_level,
                                             "intended_quality": gen.intended_quality,
                                             "prompt_ref": gen.provenance.prompt,
+                                            "slot_count": len(state.joke_set.slots),
                                         },
                                         "joke_id": gen.joke_id,
                                     })
@@ -816,6 +849,7 @@ async def _process_reaction_task(
     tracker: LatencyTracker,
 ) -> None:
     """Score/classify/file off the audio path, on a dedicated DB session."""
+    reaction_snap = current_turn()
     t0 = time.monotonic()
     try:
         factory = session_maker()
@@ -835,6 +869,13 @@ async def _process_reaction_task(
     except Exception:
         _LOG.exception("process_reaction failed; host keeps performing")
         return
+    if reaction_snap is not None:
+        bind_turn(
+            turn_id=reaction_snap.turn_id,
+            turn_index=reaction_snap.turn_index,
+            trigger_type=reaction_snap.trigger_type,
+            trigger_text=reaction_snap.trigger_text,
+        )
     total_ms = max(1, int((time.monotonic() - t0) * 1000))
     per_step_ms = total_ms // 3
 

@@ -896,6 +896,10 @@ def _trace_step_dict(t: Trace) -> dict:
         "inputs": t.inputs,
         "output": t.output,
         "cost": t.cost,
+        "trigger_type": t.trigger_type,
+        "trigger_text": t.trigger_text,
+        "turn_id": t.turn_id,
+        "turn_index": t.turn_index,
     }
 
 

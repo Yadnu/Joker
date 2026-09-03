@@ -162,7 +162,11 @@ class Joke(Base):
 
 class Trace(Base):
     """Append-only event log.  One row per record_step call.
-    Columns mirror the record_step signature exactly."""
+
+    Core columns mirror the record_step signature. trigger_type, trigger_text,
+    turn_id, and turn_index are copied from the process-local turn context at
+    write time; they are nullable so historical rows stay valid.
+    """
 
     __tablename__ = "traces"
 
@@ -178,6 +182,10 @@ class Trace(Base):
     rationale: Mapped[str] = mapped_column(Text, nullable=False)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    trigger_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    trigger_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    turn_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    turn_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )

@@ -42,6 +42,8 @@ async def extract_metadata(
     joke_text: str,
     tone_level: int = 1,
     session: AsyncSession,
+    shape: str = "",
+    critique: str = "",
 ) -> JokeMetadata:
     """Extract structured metadata from a joke.
 
@@ -110,6 +112,8 @@ async def extract_metadata(
         sensitivity_flags=valid_flags,
         theme_flags=valid_themes,
         tone_level=tone_level,
+        shape=shape,
+        critique=critique,
     )
 
     await record_step(

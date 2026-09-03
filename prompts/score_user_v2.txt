@@ -1,0 +1,15 @@
+Scoring rubric (version {rubric_version}):
+{rubric_text}
+
+Joke:
+{joke_text}
+
+User reaction:
+{user_reaction}
+
+Listener context:
+{user_context}
+
+Score the JOKE'S CRAFT against the anchors, using the reaction as supporting evidence, not as the only signal. A well-built joke with a muted room can still sit at 5-6. A shapeless line with polite laughter stays at 0-2.
+
+Return a JSON object with a single key 'score' (integer 0-10) and a key 'rationale' (one sentence).

@@ -36,6 +36,15 @@ The `session` argument is the active `AsyncSession` for the current request.
 `record_step` calls `session.flush()` but does not commit; the caller owns
 the transaction boundary.
 
+Turn grouping (trigger_type, trigger_text, turn_id, turn_index) is **not**
+passed to `record_step`. Bind it first with `bind_turn(...)` (or
+`advance_turn` on a SessionState). `record_step` copies the current
+context onto the row. Columns are nullable; historical rows stay null.
+
+Valid `trigger_type` values: `cold_open`, `user_request`, `set_continuation`,
+`reroll`, `barge_in_recovery`, `query_slot`. `trigger_text` is the verbatim
+listener utterance, or null for `cold_open` and `set_continuation`.
+
 ## Field descriptions
 
 | Argument | Notes |

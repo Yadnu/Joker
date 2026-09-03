@@ -19,20 +19,35 @@ from shared.trace import record_step
 
 _client = AsyncOpenAI()
 
-RUBRIC_VERSION = "1.0"
+RUBRIC_VERSION = "1.1"
 
 RUBRIC: dict[int, str] = {
-    0: "No reaction or explicit negative response (groan, silence, 'that's terrible').",
-    3: "Polite acknowledgment; no laughter or genuine amusement ('haha', said flatly).",
-    6: "Clear amusement; one or two genuine laughs or a smile audible in the voice.",
-    10: "Sustained laughter; listener repeats the punchline, asks for more, or says it was the best joke they've heard.",
+    0: (
+        "0-2: No identifiable shape, or the punchline does not land at all. "
+        "Example: 'Traffic was bad today and that was annoying.'"
+    ),
+    3: (
+        "3-4: Recognizable shape, but obvious or over-explained. "
+        "Example: 'My gym membership is the most expensive thing I never use.'"
+    ),
+    5: (
+        "5-6: Works, but the shape is familiar and the subject is generic. "
+        "Example: 'I don't have a savings account. I have a checking account with hope.'"
+    ),
+    7: (
+        "7-8: Lands. Specific subject, punchline in the right place. "
+        "Example: 'My landlord finally fixed the heating. I'd moved out in March.'"
+    ),
+    9: (
+        "9-10: Lands hard, surprising, and could not have been written by anyone else."
+    ),
 }
 
 # Versioned prompt file, not an inline f-string. See docs/DECISIONS.md
 # 2026-09-01 "Prompts moved to versioned files".
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 _SYSTEM_PROMPT = (_PROMPTS_DIR / "score_v1.txt").read_text(encoding="utf-8").strip()
-_USER_TEMPLATE = (_PROMPTS_DIR / "score_user_v1.txt").read_text(encoding="utf-8")
+_USER_TEMPLATE = (_PROMPTS_DIR / "score_user_v2.txt").read_text(encoding="utf-8")
 
 
 async def score(
@@ -85,7 +100,7 @@ async def score(
         kind="scoring",
         actor="librarian.score",
         model=SCORE_MODEL,
-        prompt_ref="prompts/score_user_v1.txt",
+        prompt_ref="prompts/score_user_v2.txt",
         inputs={
             "joke_text": joke_text,
             "user_reaction": user_reaction,

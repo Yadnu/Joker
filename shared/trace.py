@@ -7,12 +7,151 @@ A call that is not recorded here does not exist for grading purposes.
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
+from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _LOG = logging.getLogger("shared.trace")
 
 from box.schema.models import Trace
+
+VALID_TRIGGER_TYPES: frozenset[str] = frozenset(
+    {
+        "cold_open",
+        "user_request",
+        "set_continuation",
+        "reroll",
+        "barge_in_recovery",
+        "query_slot",
+    }
+)
+
+
+@dataclass(frozen=True)
+class TurnSnap:
+    """Cause and grouping for the current joke chain / listener exchange."""
+
+    turn_id: str
+    turn_index: int
+    trigger_type: str
+    trigger_text: str | None
+
+
+_current_turn: ContextVar[TurnSnap | None] = ContextVar("trace_turn", default=None)
+
+
+def opening_trigger_type(session_id: str) -> str:
+    """Query Slot sessions are `viewer-…`; the live show is not."""
+    return "query_slot" if session_id.startswith("viewer-") else "cold_open"
+
+
+def current_turn() -> TurnSnap | None:
+    return _current_turn.get()
+
+
+def bind_turn(
+    *,
+    turn_id: str,
+    turn_index: int,
+    trigger_type: str,
+    trigger_text: str | None,
+) -> TurnSnap:
+    """Set the turn copied onto every subsequent record_step in this task.
+
+    Does not change the record_step signature. Callers bind at the start of a
+    turn; asyncio.create_task copies the context into the child.
+    """
+    if trigger_type not in VALID_TRIGGER_TYPES:
+        raise ValueError(
+            f"Invalid trigger_type {trigger_type!r}. "
+            f"Must be one of: {sorted(VALID_TRIGGER_TYPES)}"
+        )
+    if trigger_type in ("cold_open", "set_continuation"):
+        trigger_text = None
+    snap = TurnSnap(
+        turn_id=turn_id,
+        turn_index=turn_index,
+        trigger_type=trigger_type,
+        trigger_text=trigger_text,
+    )
+    _current_turn.set(snap)
+    return snap
+
+
+def clear_turn() -> None:
+    _current_turn.set(None)
+
+
+def current_turn_fields() -> dict:
+    """Keys for librarian_step WebSocket events and Trace rows."""
+    snap = current_turn()
+    if snap is None:
+        return {
+            "trigger_type": None,
+            "trigger_text": None,
+            "turn_id": None,
+            "turn_index": None,
+        }
+    return {
+        "trigger_type": snap.trigger_type,
+        "trigger_text": snap.trigger_text,
+        "turn_id": snap.turn_id,
+        "turn_index": snap.turn_index,
+    }
+
+
+def stamp_generation(gen: object) -> None:
+    """Copy the current turn onto a SlotGeneration (or any object with the fields)."""
+    snap = current_turn()
+    if snap is None:
+        return
+    gen.turn_id = snap.turn_id  # type: ignore[attr-defined]
+    gen.turn_index = snap.turn_index  # type: ignore[attr-defined]
+    gen.trigger_type = snap.trigger_type  # type: ignore[attr-defined]
+    gen.trigger_text = snap.trigger_text  # type: ignore[attr-defined]
+
+
+def bind_from_generation(gen: object) -> None:
+    """Restore the turn that produced this slot so delivery/filing stay attached."""
+    turn_id = getattr(gen, "turn_id", None)
+    if not turn_id:
+        return
+    trigger_type = getattr(gen, "trigger_type", None)
+    if trigger_type not in VALID_TRIGGER_TYPES:
+        return
+    bind_turn(
+        turn_id=turn_id,
+        turn_index=int(getattr(gen, "turn_index", 0) or 0),
+        trigger_type=trigger_type,
+        trigger_text=getattr(gen, "trigger_text", None),
+    )
+
+
+async def restore_turn_from_artifact(session: AsyncSession, artifact_id: str) -> bool:
+    """Rebind the turn that started this artifact's chain, if one was recorded."""
+    from sqlalchemy import select
+
+    row = (
+        await session.execute(
+            select(Trace)
+            .where(Trace.artifact_id == artifact_id)
+            .where(Trace.turn_id.is_not(None))
+            .order_by(Trace.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if row is None or not row.turn_id or not row.trigger_type:
+        return False
+    if row.trigger_type not in VALID_TRIGGER_TYPES:
+        return False
+    bind_turn(
+        turn_id=row.turn_id,
+        turn_index=int(row.turn_index or 0),
+        trigger_type=row.trigger_type,
+        trigger_text=row.trigger_text,
+    )
+    return True
 
 VALID_KINDS: frozenset[str] = frozenset(
     {
@@ -34,6 +173,8 @@ VALID_KINDS: frozenset[str] = frozenset(
         "reroll_refused",
         # Performance filler covering latency. Never a joke. Never filed.
         "stall",
+        # Librarian craft note: one mechanism, stored on metadata.critique.
+        "critique",
     }
 )
 
@@ -81,6 +222,7 @@ async def record_step(
     if not rationale or not rationale.strip():
         raise ValueError("rationale is required and must be a non-empty string.")
 
+    snap = current_turn()
     row = Trace(
         artifact_id=artifact_id,
         artifact_type=artifact_type,
@@ -93,6 +235,10 @@ async def record_step(
         rationale=rationale,
         latency_ms=latency_ms,
         cost=cost,
+        trigger_type=snap.trigger_type if snap else None,
+        trigger_text=snap.trigger_text if snap else None,
+        turn_id=snap.turn_id if snap else None,
+        turn_index=snap.turn_index if snap else None,
     )
     session.add(row)
     try:

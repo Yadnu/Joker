@@ -49,7 +49,7 @@ from librarian.interface import (
     extract_metadata,
     score,
 )
-from shared.trace import record_step
+from shared.trace import bind_turn, record_step, restore_turn_from_artifact
 
 # Rotating refusal lines for tone_level == 3.  The caller supplies an index
 # (session reroll count) so the right line is selected without repetition.
@@ -99,6 +99,7 @@ async def reroll(
       refusal_line:        str | None
     """
     t0_total = time.monotonic()
+    await restore_turn_from_artifact(session, original_joke_id)
 
     # ------------------------------------------------------------------
     # Step 1: score the rejection, classify, extract metadata, file it.
@@ -200,6 +201,12 @@ async def reroll(
 
     new_tone_level: Literal[1, 2, 3] = tone_level + 1  # type: ignore[assignment]
     replacement_id = f"joke_{uuid.uuid4().hex[:12]}"
+    bind_turn(
+        turn_id=f"{replacement_id}:reroll",
+        turn_index=1,
+        trigger_type="reroll",
+        trigger_text=_REJECTION_REACTION,
+    )
 
     t0_gen = time.monotonic()
     replacement_text, replacement_provenance = await generate(

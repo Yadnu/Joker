@@ -22,8 +22,8 @@ def _completion(payload: dict):
 
 
 def test_rubric_has_written_anchors():
-    assert RUBRIC_VERSION == "1.0"
-    for anchor in (0, 3, 6, 10):
+    assert RUBRIC_VERSION == "1.1"
+    for anchor in (0, 3, 5, 7, 9):
         assert anchor in RUBRIC
         assert len(RUBRIC[anchor]) > 20
 
@@ -51,5 +51,5 @@ async def test_score_trace_includes_rubric_version(db):
         await db.execute(select(Trace).where(Trace.artifact_id == "joke_score_1"))
     ).scalar_one()
     assert row.kind == "scoring"
-    assert row.inputs["rubric_version"] == "1.0"
+    assert row.inputs["rubric_version"] == "1.1"
     assert row.output["score"] == 8

@@ -602,6 +602,25 @@ esponse.audio.done fires on OpenAI).  Net effect: cards arrive slightly earlier,
 **Reason:** Asking for a knock-knock returned the identical joke every time because the host answered from the archive: `funniest_in_genre` is `ORDER BY score DESC` and `scripts/seed.py` filed the interrupting cow at score 9. No prompt change could vary a deterministic query. Requests must reach the generator. Sampling belongs in the Joker, not in the Box, which stores what it is handed.
 **Cost:** A requested bit is filed at score 0 and a later reaction is attributed to the scripted slot the host was on, so some requested jokes keep score 0. `fresh_bit` uses `candidate_count=1` to stay inside the voice provider's tool-response timeout, so it gets one draft-then-sharpen pass instead of three.
 
+---
+
+### 2026-09-02 Few-shot shapes, critique field, rubric 1.1
+
+**Decision:** Add six few-shot turns (reversal, literalism, definition, wrong-detail, compression, misdirect) in `prompts/shapes_v1.md`, appended to `persona.md` and `persona_v4.md`. Generation loads v4. Spoken `JOKE_SHAPES` and `JOKE_ENGINES` stay. `ClassificationResponse.critique` is a mechanism sentence; `kind=critique` is a new trace kind; score is unchanged. SessionState keeps the last five critiques and feeds them to generate() and suggest() as room feedback. Rubric anchors were replaced and versioned to 1.1. `JokeMetadata` gained optional `shape` and `critique`.
+**Alternatives:** Replace spoken shapes with the six turns (would break existing rotation tests); fold critique into the score rationale (hides craft notes); keep reaction-only scoring anchors.
+**Reason:** Few-shot structure beats adjectives. A named failure in the next prompt is the only adaptation a reviewer can grade. Low clustered scores were using a reaction rubric, not a craft rubric.
+**Cost:** One extra classify retry when the critique is vibe-only. Generation prompts are longer. Older jokes have empty `metadata.shape` / `metadata.critique`.
+
+---
+
+### 2026-09-02 Trace steps carry the turn that caused them
+
+**Decision:** Add nullable `trigger_type`, `trigger_text`, `turn_id`, and `turn_index` on `traces`. `record_step`'s signature is unchanged; a contextvar (`bind_turn` / `advance_turn`) is copied onto every row in the current task, including `asyncio.create_task` children. Alembic 006 does not backfill. The Viewer groups archive traces and the live Librarian feed by `turn_id` with the same header copy.
+**Alternatives:** Add kwargs to `record_step` (would touch every call site); backfill guessed triggers on old rows; replace `artifact_id` linkage with turns.
+**Reason:** A flat step list shows what happened, not whether the host opened, the listener asked, the set continued, a reroll fired, or Query Slot originated the bit. Same fields on the WebSocket `librarian_step` event keep the live feed from disagreeing with stored traces.
+**Cost:** Historical rows stay null and render as an "unrecorded" group. Delivery/filing must re-bind the slot's stored turn so a later barge-in or reaction turn does not stamp the wrong cause.
+
+
 
 
 

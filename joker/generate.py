@@ -36,6 +36,7 @@ from openai import AsyncOpenAI, RateLimitError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from box.schema.records import Provenance
+from librarian.critique import FEW_SHOT_SHAPES, format_room_feedback
 from shared.models import (
     GENERATE_GOOD,
     GENERATE_BAD,
@@ -54,7 +55,7 @@ _CANDIDATE_COUNT = 3
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 # Load the persona once; it is prepended to every tone prompt.
-_PERSONA = (_PROMPTS_DIR / "persona_v3.md").read_text(encoding="utf-8").strip()
+_PERSONA = (_PROMPTS_DIR / "persona_v4.md").read_text(encoding="utf-8").strip()
 _GOOD_SYSTEM = (_PROMPTS_DIR / "generate_good_v3.txt").read_text(encoding="utf-8").strip()
 
 _TONE_FILE_NAMES: dict[int, str] = {
@@ -84,7 +85,7 @@ _TONE_PROMPT_REFS: dict[int, str] = {
 # User-prompt templates, kept for the bad-joke path which still uses the
 # original templates.  The good path and all tone paths use the same user
 # template; the system prompt is what varies by tone.
-_GOOD_USER_TEMPLATE = (_PROMPTS_DIR / "generate_good_user_v3.txt").read_text(encoding="utf-8")
+_GOOD_USER_TEMPLATE = (_PROMPTS_DIR / "generate_good_user_v4.txt").read_text(encoding="utf-8")
 _BAD_USER_TEMPLATE = (_PROMPTS_DIR / "generate_bad_user_v1.txt").read_text(encoding="utf-8")
 
 JOKE_SHAPES: tuple[str, ...] = (
@@ -197,6 +198,9 @@ async def generate(
     form: str = "stand-up bit",
     avoid: list[str] | None = None,
     candidate_count: int | None = None,
+    few_shot_shape: str | None = None,
+    last_few_shot_shape: str | None = None,
+    recent_critiques: list | None = None,
 ) -> tuple[str, Provenance]:
     """Generate a joke and return (joke_text, provenance).
 
@@ -207,6 +211,10 @@ async def generate(
     provenance is fully populated so the caller can store it in the joke record.
     """
     model = GOOD_MODEL if intended_quality == "good" else BAD_MODEL
+    few_shot_shape = few_shot_shape or next_few_shot_shape(
+        last_few_shot_shape=last_few_shot_shape
+    )
+    recent_critiques = list(recent_critiques or [])
     system_prompt = _TONE_PROMPTS[tone_level]
     if intended_quality == "good":
         system_prompt = f"{system_prompt}\n\n{_GOOD_SYSTEM}"
@@ -221,6 +229,9 @@ async def generate(
         last_engine=last_engine or "none",
         form=form,
         avoid=avoid or [],
+        few_shot_shape=few_shot_shape,
+        last_few_shot_shape=last_few_shot_shape or "none",
+        recent_critiques=recent_critiques,
     )
     prompt_ref = _TONE_PROMPT_REFS[tone_level]
     # A live request cannot wait for three full draft-then-sharpen passes; one
@@ -286,6 +297,9 @@ async def generate(
             "form": form,
             "avoid_count": len(avoid or []),
             "candidate_count": n_candidates,
+            "few_shot_shape": few_shot_shape,
+            "last_few_shot_shape": last_few_shot_shape,
+            "recent_critiques": list(recent_critiques or []),
         },
         output={
             "joke_text": joke_text,
@@ -296,7 +310,10 @@ async def generate(
             f"Used {model} for intended_quality={intended_quality!r} at "
             f"tone_level={tone_level} (prompt: {prompt_ref}). "
             f"Set position {set_position}. "
-            f"Selected from {n_candidates} candidate(s). {selection_rationale}"
+            f"Selected from {n_candidates} candidate(s). "
+            f"Few-shot shape={few_shot_shape!r}. "
+            f"Room critiques that informed this bit: "
+            f"{recent_critiques or 'none'}. {selection_rationale}"
         ),
         latency_ms=latency_ms,
         cost=_estimate_cost(response, model),
@@ -352,6 +369,14 @@ def next_shape(*, last_shape: str | None, slot_idx: int) -> str:
     return random.choice(options) if options else "one-liner"
 
 
+def next_few_shot_shape(*, last_few_shot_shape: str | None) -> str:
+    """Pick a few-shot turn. Never the same as the previous bit's."""
+    import random
+
+    options = [s for s in FEW_SHOT_SHAPES if s != last_few_shot_shape]
+    return random.choice(options) if options else "reversal"
+
+
 def next_engine(*, last_engine: str | None) -> str:
     """Pick the comic mechanism. Never the same as the previous bit's."""
     import random
@@ -372,6 +397,9 @@ def _user_prompt(
     last_engine: str = "none",
     form: str = "stand-up bit",
     avoid: list[str] | None = None,
+    few_shot_shape: str = "reversal",
+    last_few_shot_shape: str = "none",
+    recent_critiques: list | None = None,
 ) -> str:
     if intended_quality == "bad":
         return _BAD_USER_TEMPLATE.format(
@@ -388,6 +416,9 @@ def _user_prompt(
         last_engine=last_engine,
         form=form,
         avoid="; ".join(spent[-12:]) if spent else "nothing yet",
+        few_shot_shape=few_shot_shape,
+        last_few_shot_shape=last_few_shot_shape,
+        room_feedback=format_room_feedback(list(recent_critiques or [])),
     ).strip()
 
 

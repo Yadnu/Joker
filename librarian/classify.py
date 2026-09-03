@@ -24,6 +24,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from box.schema.models import Cabinet, Drawer, File
+from librarian.critique import NO_SHAPE, normalize_critique
 from librarian.interface import (
     ClassificationRequest,
     ClassificationResponse,
@@ -38,8 +39,8 @@ _client = AsyncOpenAI()
 # Versioned prompt file, not an inline f-string. See docs/DECISIONS.md
 # 2026-09-01 "Prompts moved to versioned files".
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
-_SYSTEM_PROMPT = (_PROMPTS_DIR / "classify_v1.txt").read_text(encoding="utf-8").strip()
-_USER_TEMPLATE = (_PROMPTS_DIR / "classify_user_v1.txt").read_text(encoding="utf-8")
+_SYSTEM_PROMPT = (_PROMPTS_DIR / "classify_v2.txt").read_text(encoding="utf-8").strip()
+_USER_TEMPLATE = (_PROMPTS_DIR / "classify_user_v2.txt").read_text(encoding="utf-8")
 
 
 async def classify(
@@ -88,11 +89,33 @@ async def classify(
     if len(path) != 3:
         raise ValueError(f"path must have exactly 3 elements [cabinet, drawer, file]; got {path}")
 
+    raw_critique = str(raw.get("critique") or "").strip()
+    critique = normalize_critique(raw_critique)
+    if critique == NO_SHAPE and raw_critique and raw_critique != NO_SHAPE:
+        retry = await _client.chat.completions.create(
+            **completion_kwargs(
+                CLASSIFY_MODEL,
+                response_format={"type": "json_object"},
+                messages=build_messages(
+                    _SYSTEM_PROMPT,
+                    (
+                        prompt
+                        + "\n\nYour previous critique was invalid (vibe or no mechanism). "
+                        "Return the same classification JSON with a mechanism critique."
+                    ),
+                    CLASSIFY_MODEL,
+                ),
+            )
+        )
+        retry_raw = json.loads(retry.choices[0].message.content or "{}")
+        critique = normalize_critique(str(retry_raw.get("critique") or ""))
+
     result = ClassificationResponse(
         category=category,
         is_new=is_new,
         justification=justification,
         path=path,
+        critique=critique,
     )
 
     total_ms = int((time.monotonic() - t0) * 1000)
@@ -103,7 +126,7 @@ async def classify(
         kind="classification",
         actor="librarian.classify",
         model=CLASSIFY_MODEL,
-        prompt_ref="prompts/classify_user_v1.txt",
+        prompt_ref="prompts/classify_user_v2.txt",
         inputs={
             "joke_text": request.joke_text,
             "user_reaction": request.user_reaction,
@@ -115,6 +138,24 @@ async def classify(
         rationale=justification,
         latency_ms=total_ms,
         cost=_estimate_cost(response),
+        session=session,
+    )
+
+    await record_step(
+        artifact_id=f"category:{category}",
+        artifact_type="joke",
+        kind="critique",
+        actor="librarian.classify",
+        model=CLASSIFY_MODEL,
+        prompt_ref="prompts/classify_user_v2.txt",
+        inputs={"joke_text": request.joke_text, "raw_critique": raw_critique},
+        output={"critique": critique},
+        rationale=(
+            f"Craft note: {critique} "
+            "Score is a separate step; this names one mechanism only."
+        ),
+        latency_ms=0,
+        cost=None,
         session=session,
     )
 

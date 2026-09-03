@@ -56,12 +56,20 @@ from box.main import app  # noqa: E402
 from box.schema.models import Base  # noqa: E402
 import shared.db as _db_module  # noqa: E402
 import uuid  # noqa: E402
+from shared.trace import clear_turn  # noqa: E402
 
 # box/main.py calls load_dotenv(override=True) at import time, which re-sets
 # BOX_TRANSPORT and DATABASE_URL from the .env file. Restore the test overrides
 # now that all application modules have been imported.
 os.environ.pop("BOX_TRANSPORT", None)
 os.environ["DATABASE_URL"] = _test_url
+
+@pytest.fixture(autouse=True)
+def _reset_trace_turn():
+    clear_turn()
+    yield
+    clear_turn()
+
 
 # ---------------------------------------------------------------------------
 # Test database URL

@@ -1,0 +1,6 @@
+{body}
+
+Recent room critiques (what has been failing or working; account for this, not only thin genres):
+{recent_critiques}
+
+Suggest angles that are fresh, relevant, and varied. Prefer thin genres. Avoid genres already delivered this session. Each rationale must name the listener trait it responds to. If recent critiques name a repeated failure, do not steer toward another angle that invites the same failure.

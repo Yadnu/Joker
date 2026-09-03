@@ -152,6 +152,10 @@ class JokeMetadata(BaseModel):
     theme_flags: list[ThemeFlag] = Field(default_factory=list)
     # Tone ladder level (1=standard, 2=edgier, 3=darkest) at generation time.
     tone_level: int = Field(default=1, ge=1, le=3)
+    # Few-shot turn name (reversal, literalism, ...). Empty on older records.
+    shape: str = ""
+    # One-sentence mechanism critique. Empty on older records. Score is separate.
+    critique: str = ""
 
 
 class Attribution(BaseModel):

@@ -2,13 +2,16 @@
 
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchJoke } from '@/lib/api'
+import { fetchJoke, fetchTrace } from '@/lib/api'
+import { describeTurn, groupByTurn } from '@/lib/turns'
+import Link from 'next/link'
 import type {
   JokeRecord,
   PromptTurn,
   UserContext,
   SelectionPath,
   TreeData,
+  TraceStep,
 } from '@/lib/types'
 
 // ---------------------------------------------------------------------------
@@ -199,6 +202,46 @@ function Breadcrumb({ path, category }: { path: SelectionPath | null; category: 
   )
 }
 
+function PromptedBy({ steps }: { steps: TraceStep[] }) {
+  const groups = groupByTurn(steps)
+  const withCause = groups.find((g) => g.trigger_type) ?? groups[0]
+  if (!withCause || (!withCause.trigger_type && steps.length === 0)) {
+    return (
+      <Section label="What prompted this">
+        <p className="font-mono text-[11px] text-lo leading-relaxed">
+          No trigger was recorded. Historical rows keep null triggers.
+        </p>
+      </Section>
+    )
+  }
+  const d = describeTurn(withCause)
+  return (
+    <Section label="What prompted this">
+      <div className="card-raised p-3 space-y-1">
+        <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-hi">
+          {d.kicker}
+        </p>
+        {d.quoted ? (
+          <p className="font-mono text-xs text-mid leading-relaxed">“{d.subtitle}”</p>
+        ) : d.replacedJokeId ? (
+          <p className="font-mono text-xs text-mid leading-relaxed">
+            Replacing{' '}
+            <Link
+              href={`/viewer?joke=${encodeURIComponent(d.replacedJokeId)}`}
+              className="text-accent underline"
+            >
+              {d.replacedJokeId}
+            </Link>
+            .
+          </p>
+        ) : (
+          <p className="font-mono text-xs text-mid leading-relaxed">{d.subtitle}</p>
+        )}
+      </div>
+    </Section>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -214,6 +257,12 @@ export default function JokeDetail({ jokeId, selectionPath, tree }: Props) {
     queryKey: ['joke', jokeId],
     queryFn: () => fetchJoke(jokeId!),
     enabled: jokeId !== null,
+  })
+  const { data: trace } = useQuery({
+    queryKey: ['trace', jokeId],
+    queryFn: () => fetchTrace(jokeId!),
+    enabled: jokeId !== null,
+    staleTime: 60_000,
   })
 
   // Resolve path from tree if selectionPath is not already set
@@ -274,6 +323,9 @@ export default function JokeDetail({ jokeId, selectionPath, tree }: Props) {
         <span className="font-mono text-[9px] text-lo">{joke.id}</span>
       </div>
 
+      {/* What prompted this joke — shown before reasoning in the trace pane too */}
+      <PromptedBy steps={trace?.steps ?? []} />
+
       {/* Generation dialogue */}
       <Section label="Generation Dialogue">
         <PromptExchange turns={joke.prompt_responses} />
@@ -320,6 +372,12 @@ export default function JokeDetail({ jokeId, selectionPath, tree }: Props) {
             <CtxRow label="Style" value={joke.metadata.style} />
             <CtxRow label="Length" value={joke.metadata.length} />
             <CtxRow label="Tone level" value={`Level ${joke.metadata.tone_level}`} />
+            {joke.metadata.shape ? (
+              <CtxRow label="Shape" value={joke.metadata.shape} />
+            ) : null}
+            {joke.metadata.critique ? (
+              <CtxRow label="Critique" value={joke.metadata.critique} />
+            ) : null}
           </div>
           {joke.metadata.sensitivity_flags.length > 0 && (
             <div className="pt-1 flex flex-wrap gap-1">

@@ -20,6 +20,7 @@ from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from box.schema.records import UserContext
+from librarian.critique import format_room_feedback
 from librarian.interface import (
     Angle,
     SuggestionRequest,
@@ -39,7 +40,7 @@ _HIGH_SCORE_THRESHOLD = 7
 # 2026-09-01 "Prompts moved to versioned files".
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 _SYSTEM_PROMPT = (_PROMPTS_DIR / "suggest_v1.txt").read_text(encoding="utf-8").strip()
-_USER_TEMPLATE = (_PROMPTS_DIR / "suggest_user_v1.txt").read_text(encoding="utf-8")
+_USER_TEMPLATE = (_PROMPTS_DIR / "suggest_user_v2.txt").read_text(encoding="utf-8")
 
 
 async def suggest(
@@ -83,6 +84,7 @@ async def suggest(
         coverage=coverage,
         active_fields=active_fields,
         preferred_tone=preferred_tone,
+        recent_critiques=request.recent_critiques,
     )
 
     system = _SYSTEM_PROMPT
@@ -135,7 +137,7 @@ async def suggest(
         kind="suggestion",
         actor="librarian.suggest",
         model=SUGGEST_MODEL,
-        prompt_ref="prompts/suggest_user_v1.txt",
+        prompt_ref="prompts/suggest_user_v2.txt",
         inputs={
             "user_context": ctx.model_dump(mode="json", exclude_none=True),
             "active_context_fields": active_fields,
@@ -144,6 +146,7 @@ async def suggest(
             "high_scorer_count": len(high_rows),
             "thin_genres": thin_genres,
             "preferred_tone_level": preferred_tone,
+            "recent_critiques": list(request.recent_critiques or []),
         },
         output={"angles": [a.model_dump() for a in angles]},
         rationale=rationale,
@@ -194,6 +197,7 @@ def _build_prompt(
     coverage: dict[str, int],
     active_fields: list[str],
     preferred_tone: int,
+    recent_critiques: list | None = None,
 ) -> str:
     ctx = user_context
     ctx_lines: list[str] = []
@@ -252,7 +256,11 @@ def _build_prompt(
         "For each suggested angle, include a 'tone_level' field (integer 1–3) "
         "matching the recommended tone level for this listener.",
     ]
-    return _USER_TEMPLATE.format(body="\n".join(lines)).strip()
+    room = format_room_feedback(list(recent_critiques or []))
+    return _USER_TEMPLATE.format(
+        body="\n".join(lines),
+        recent_critiques=room,
+    ).strip()
 
 
 def _build_rationale(
