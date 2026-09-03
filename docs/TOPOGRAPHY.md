@@ -194,3 +194,7 @@ rows after a real `/ws/session/{id}` run flushes this file.
 | 2026-09-02 | classification | 9547 | 11735 | 3 |
 | 2026-09-02 | scoring | 1541 | 2124 | 3 |
 | 2026-09-02 | filing | 1255 | 2177 | 3 |
+| 2026-09-02 | suggestion | 7690 | 7690 | 1 |
+| 2026-09-02 | generation | 3690 | 9914 | 6 |
+| 2026-09-02 | tts_first_byte | 0 | 0 | 2 |
+| 2026-09-02 | reaction_capture | 0 | 0 | 2 |
