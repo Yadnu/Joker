@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jokebox Architecture</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #171e27; --panel2: #1e2833; --line: #3a4756; --text: #e8edf2; --muted: #93a1b1;
+    --joker: #f2b84b; --lib: #6cb6ff; --box: #7ee0a0; --shared: #c4a1ff; --ext: #ff8f8f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, Segoe UI, sans-serif; padding: 28px; }
+  h1 { margin: 0 0 4px; font-size: 26px; }
+  .sub { color: var(--muted); margin-bottom: 22px; }
+  .wrap { max-width: 1200px; margin: 0 auto; }
+  .tier { border: 1.5px solid var(--line); border-radius: 14px; padding: 14px 16px; background: var(--panel); }
+  .tier > .t { font-weight: 600; margin-bottom: 10px; }
+  .tier > .t small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+  .grid { display: grid; gap: 14px; }
+  .g2 { grid-template-columns: repeat(2, 1fr); }
+  .g3 { grid-template-columns: repeat(3, 1fr); }
+  .g4 { grid-template-columns: repeat(4, 1fr); }
+  .comp { border: 2px solid var(--c); border-radius: 12px; background: var(--panel2); padding: 12px; }
+  .comp h3 { margin: 0 0 2px; color: var(--c); font-size: 17px; }
+  .comp .role { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+  .m { border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; margin-top: 6px; font-size: 13px; background: var(--panel); }
+  .m b { font-family: Consolas, monospace; font-weight: 600; color: var(--text); }
+  .m span { color: var(--muted); }
+  .joker { --c: var(--joker); } .lib { --c: var(--lib); } .box { --c: var(--box); } .shared { --c: var(--shared); } .ext { --c: var(--ext); }
+  .arrow { text-align: center; color: var(--muted); font-size: 13px; padding: 8px 0; }
+  .arrow::before { content: "\2193  "; color: var(--text); }
+  .arrow::after { content: "  \2193"; color: var(--text); }
+  .rules { margin-top: 22px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--panel); }
+  .card h4 { margin: 0 0 8px; }
+  .card ul { margin: 0; padding-left: 18px; color: var(--muted); }
+  .card li { margin: 4px 0; }
+  .card li b { color: var(--text); }
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .step { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--panel2); font-size: 13px; }
+  .flow .a { color: var(--muted); }
+  .dashed { border-style: dashed; }
+  @media (max-width: 900px) { .g2, .g3, .g4, .rules { grid-template-columns: 1fr; } }
+  @media print { body { background: #fff; color: #000; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Jokebox architecture</h1>
+  <div class="sub">AI stand-up comedian: live voice, scored reactions, strict taxonomy, fully traced decisions.</div>
+
+  <div class="tier">
+    <div class="t">Browser <small>Next.js App Router, TypeScript, Tailwind, TanStack Query (client-only)</small></div>
+    <div class="grid g2">
+      <div class="m"><b>/</b> <span>Live show: mic, host, critic column, transcript</span></div>
+      <div class="m"><b>/viewer</b> <span>Archive tree, joke detail, trace panel, export, Query Slot</span></div>
+    </div>
+  </div>
+
+  <div class="arrow">WebSocket PCM16 (show) &nbsp;|&nbsp; HTTP (archive)</div>
+
+  <div class="tier">
+    <div class="t">One FastAPI process <small>box.main:app, Python, SQLAlchemy 2.0, Pydantic v2</small></div>
+    <div class="grid g3">
+      <div class="comp joker">
+        <h3>The Joker</h3>
+        <div class="role">Performs and files. Voice, sets, generation.</div>
+        <div class="m"><b>realtime.py</b> <span>WS /ws/session/{id}, barge-in</span></div>
+        <div class="m"><b>orchestrator.py</b> <span>suggest, set, generate, score, classify, file</span></div>
+        <div class="m"><b>setbuilder.py</b> <span>ordered slots + transitions, recovery</span></div>
+        <div class="m"><b>generate.py</b> <span>good and deliberate-bad paths</span></div>
+        <div class="m"><b>voice/</b> <span>ElevenLabs (default), OpenAI Realtime</span></div>
+        <div class="m"><b>reroll, tools, stalls, latency</b></div>
+      </div>
+      <div class="comp lib">
+        <h3>The Librarian</h3>
+        <div class="role">All judgment about what a joke is.</div>
+        <div class="m"><b>interface.py</b> <span>versioned contract 1.0</span></div>
+        <div class="m"><b>suggest.py</b> <span>ranked angles before generation</span></div>
+        <div class="m"><b>classify.py</b> <span>genre + three-label path</span></div>
+        <div class="m"><b>score.py</b> <span>reaction rubric, 0-10</span></div>
+        <div class="m"><b>metadata.py</b>, <b>critique.py</b></div>
+      </div>
+      <div class="comp box">
+        <h3>The Box</h3>
+        <div class="role">Stores what it is handed. No inference.</div>
+        <div class="m"><b>router.py</b> <span>accounts, upsert, reads, export</span></div>
+        <div class="m"><b>/compliance</b> <span>live check, never a stored flag</span></div>
+        <div class="m"><b>schema/records.py</b> <span>fixed joke fields</span></div>
+        <div class="m"><b>schema/models.py</b> <span>ORM + unique constraints</span></div>
+        <div class="m"><b>Bearer auth</b> <span>sha256 key hash</span></div>
+      </div>
+    </div>
+    <div style="height:14px"></div>
+    <div class="comp shared">
+      <h3>Shared</h3>
+      <div class="grid g4">
+        <div class="m"><b>trace.py</b> <span>record_step, rationale required</span></div>
+        <div class="m"><b>box_client.py</b> <span>HTTP to the Box</span></div>
+        <div class="m"><b>models.py</b> <span>model names, env overrides</span></div>
+        <div class="m"><b>db.py</b> <span>async session</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">SQL (asyncpg) &nbsp;|&nbsp; model calls &nbsp;|&nbsp; voice stream</div>
+
+  <div class="grid g3">
+    <div class="comp ext"><h3>PostgreSQL</h3><div class="role">accounts, cabinets, drawers, files, jokes, traces</div></div>
+    <div class="comp ext"><h3>OpenAI</h3><div class="role">o3 (generate, classify, setbuilder), gpt-4o-mini (suggest, score, metadata)</div></div>
+    <div class="comp ext"><h3>ElevenLabs</h3><div class="role">Conversational AI voice, VAD, tools</div></div>
+  </div>
+
+  <div class="rules">
+    <div class="card" style="grid-column: 1 / -1;">
+      <h4>One live joke, end to end</h4>
+      <div class="flow">
+        <span class="step">Librarian suggests angles</span><span class="a">&rarr;</span>
+        <span class="step">Joker builds set</span><span class="a">&rarr;</span>
+        <span class="step">Generate joke</span><span class="a">&rarr;</span>
+        <span class="step">Voice delivers</span><span class="a">&rarr;</span>
+        <span class="step">Capture reaction</span><span class="a">&rarr;</span>
+        <span class="step">Score</span><span class="a">&rarr;</span>
+        <span class="step">Classify</span><span class="a">&rarr;</span>
+        <span class="step">PUT /box/upsert</span><span class="a">&rarr;</span>
+        <span class="step dashed">Score &lt; 4: adapt set</span>
+      </div>
+      <div class="sub" style="margin:8px 0 0">Every step writes a trace row with a rationale.</div>
+    </div>
+    <div class="card">
+      <h4>Design rules</h4>
+      <ul>
+        <li><b>Hierarchy:</b> Box &gt; Cabinet &gt; Drawer &gt; File &gt; Joke, more than one child at every level</li>
+        <li><b>Separation:</b> Box stores, Librarian judges, Joker performs</li>
+        <li><b>Seam:</b> Joker and Librarian talk only through interface.py</li>
+        <li><b>Traceability:</b> every model call goes through record_step</li>
+        <li><b>Provenance:</b> generated or curated, model, prompt, rationale</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>Engineering decisions</h4>
+      <ul>
+        <li><b>Concurrency:</b> ON CONFLICT DO NOTHING plus unique constraints, one commit per upsert</li>
+        <li><b>Compliance:</b> computed live, so it cannot go stale</li>
+        <li><b>Auth:</b> account taken from bearer, not body, so attribution can't be spoofed</li>
+        <li><b>Voice:</b> provider behind a VoiceSession interface; barge-in still files the bit</li>
+        <li><b>Known gaps:</b> generate.py imports librarian.critique; classify writes File rows by SQL</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</body>
+</html>

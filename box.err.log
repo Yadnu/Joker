@@ -1,0 +1,601 @@
+INFO:     Started server process [13964]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:54826 - "WebSocket /ws/session/show-1793333544655-dqcdip" [accepted]
+INFO:     connection open
+record_step failed artifact_id=category:Health & Medicine artifact_type=category kind=classification actor=librarian.classify
+Traceback (most recent call last):
+  File "C:\development\Joker\shared\trace.py", line 245, in record_step
+    await session.flush()
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 1030, in flush
+    await greenlet_spawn(self.sync_session.flush, objects=objects)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\concurrency.py", line 210, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 4543, in flush
+    self._flush(objects)
+  File "<sqlalchemy generated warned() wrapper for sqlalchemy.orm.session.Session._flush>", line 2, in _flush
+    return target(fn, self, objects=objects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\deprecations.py", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 4686, in _flush
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 166, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 4647, in _flush
+    flush_context.execute()
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\unitofwork.py", line 467, in execute
+    rec.execute(self)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\unitofwork.py", line 643, in execute
+    util.preloaded.orm_persistence._save_obj(
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\persistence.py", line 67, in _save_obj
+    ) in _organize_states_for_save(base_mapper, states, uowtransaction):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\persistence.py", line 222, in _organize_states_for_save
+    for state, dict_, mapper, connection in _connections_for_states(
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\persistence.py", line 1761, in _connections_for_states
+    connection = uowtransaction.transaction.connection(base_mapper)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<sqlalchemy generated _go() wrapper for sqlalchemy.orm.session.SessionTransaction.connection>", line 2, in connection
+    return target(fn, self, bindkey, execution_options=execution_options, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 137, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 1053, in connection
+    return self._connection_for_bind(bind, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<sqlalchemy generated _go() wrapper for sqlalchemy.orm.session.SessionTransaction._connection_for_bind>", line 2, in _connection_for_bind
+    return target(fn, self, bind, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 137, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 1189, in _connection_for_bind
+    conn = self._parent._connection_for_bind(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<sqlalchemy generated _go() wrapper for sqlalchemy.orm.session.SessionTransaction._connection_for_bind>", line 2, in _connection_for_bind
+    return target(fn, self, bind, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 137, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 1203, in _connection_for_bind
+    conn = bind.connect()
+           ^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\base.py", line 3275, in connect
+    return self._connection_cls(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\base.py", line 149, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\base.py", line 3299, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\pool\base.py", line 445, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\pool\base.py", line 1324, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\pool\base.py", line 714, in checkout
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 166, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    dbapi_connection = rec.get_connection()
+                       ^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\pool\base.py", line 877, in get_connection
+    self.__connect()
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\pool\base.py", line 916, in __connect
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 166, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\pool\base.py", line 912, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\create.py", line 645, in connect
+    return dialect.connect(*cargs_tup, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\default.py", line 869, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 967, in connect
+    return await_(
+           ^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\concurrency.py", line 167, in await_
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\concurrency.py", line 205, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\connectors\asyncio.py", line 378, in create
+    cls._handle_exception_no_connection(dbapi, error)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 841, in _handle_exception_no_connection
+    super()._handle_exception_no_connection(dbapi, error)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\connectors\asyncio.py", line 409, in _handle_exception_no_connection
+    raise error.with_traceback(exc_info[2])
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\connectors\asyncio.py", line 376, in create
+    connection = await connection_awaitable
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connection.py", line 2498, in connect
+    return await connect_utils._connect(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connect_utils.py", line 1307, in _connect
+    raise last_error or exceptions.TargetServerAttributeNotMatched(
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connect_utils.py", line 1278, in _connect
+    conn = await _connect_addr(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connect_utils.py", line 1088, in _connect_addr
+    return await __connect_addr(params, False, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connect_utils.py", line 1162, in __connect_addr
+    tr, pr = await connector
+             ^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connect_utils.py", line 1012, in _create_ssl_connection
+    new_tr = await loop.start_tls(
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\yadne\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1314, in start_tls
+    await waiter
+  File "C:\Users\yadne\AppData\Local\Programs\Python\Python312\Lib\asyncio\proactor_events.py", line 286, in _loop_reading
+    length = fut.result()
+             ^^^^^^^^^^^^
+  File "C:\Users\yadne\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 803, in _poll
+    value = callback(transferred, key, ov)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\yadne\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 462, in finish_socket_func
+    return ov.getresult()
+           ^^^^^^^^^^^^^^
+ConnectionAbortedError: [WinError 1236] The network connection was aborted by the local system
+trace commit failed
+Traceback (most recent call last):
+  File "C:\development\Joker\joker\realtime.py", line 119, in _keep_flushed_traces
+    await session.commit()
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 1308, in commit
+    await greenlet_spawn(self.sync_session.commit)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\concurrency.py", line 199, in greenlet_spawn
+    result = context.switch(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 2095, in commit
+    trans.commit(_to_root=True)
+  File "<sqlalchemy generated _go() wrapper for sqlalchemy.orm.session.SessionTransaction.commit>", line 2, in commit
+    return target(fn, self, _to_root=_to_root)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 101, in _go
+    self._raise_for_prerequisite_state(fn.__name__, current_state)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 987, in _raise_for_prerequisite_state
+    raise sa_exc.PendingRollbackError(
+sqlalchemy.exc.PendingRollbackError: This Session's transaction has been rolled back due to a previous exception during flush. To begin a new transaction with this Session, first issue Session.rollback(). Original exception was: [WinError 1236] The network connection was aborted by the local system (Background on this error at: https://sqlalche.me/e/21/7s2a)
+session-end file_unfiled_slots failed
+Traceback (most recent call last):
+  File "C:\development\Joker\joker\realtime.py", line 222, in _flush_unfiled_slots
+    await orchestrator.file_unfiled_slots(state=state, session=db_session)
+  File "C:\development\Joker\joker\orchestrator.py", line 627, in file_unfiled_slots
+    await file_told_slot(state=state, slot_idx=slot_idx, session=session)
+  File "C:\development\Joker\joker\orchestrator.py", line 610, in file_told_slot
+    return await _classify_and_upsert_slot(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\joker\orchestrator.py", line 525, in _classify_and_upsert_slot
+    classification = await classify(
+                     ^^^^^^^^^^^^^^^
+  File "C:\development\Joker\librarian\interface.py", line 190, in classify
+    return await _classify(request, session)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\librarian\classify.py", line 123, in classify
+    await record_step(
+  File "C:\development\Joker\shared\trace.py", line 245, in record_step
+    await session.flush()
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 1030, in flush
+    await greenlet_spawn(self.sync_session.flush, objects=objects)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\concurrency.py", line 210, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 4543, in flush
+    self._flush(objects)
+  File "<sqlalchemy generated warned() wrapper for sqlalchemy.orm.session.Session._flush>", line 2, in _flush
+    return target(fn, self, objects=objects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\deprecations.py", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 4686, in _flush
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 166, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 4647, in _flush
+    flush_context.execute()
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\unitofwork.py", line 467, in execute
+    rec.execute(self)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\unitofwork.py", line 643, in execute
+    util.preloaded.orm_persistence._save_obj(
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\persistence.py", line 67, in _save_obj
+    ) in _organize_states_for_save(base_mapper, states, uowtransaction):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\persistence.py", line 222, in _organize_states_for_save
+    for state, dict_, mapper, connection in _connections_for_states(
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\persistence.py", line 1761, in _connections_for_states
+    connection = uowtransaction.transaction.connection(base_mapper)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<sqlalchemy generated _go() wrapper for sqlalchemy.orm.session.SessionTransaction.connection>", line 2, in connection
+    return target(fn, self, bindkey, execution_options=execution_options, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 137, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 1053, in connection
+    return self._connection_for_bind(bind, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<sqlalchemy generated _go() wrapper for sqlalchemy.orm.session.SessionTransaction._connection_for_bind>", line 2, in _connection_for_bind
+    return target(fn, self, bind, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 137, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 1189, in _connection_for_bind
+    conn = self._parent._connection_for_bind(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<sqlalchemy generated _go() wrapper for sqlalchemy.orm.session.SessionTransaction._connection_for_bind>", line 2, in _connection_for_bind
+    return target(fn, self, bind, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 137, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 1203, in _connection_for_bind
+    conn = bind.connect()
+           ^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\base.py", line 3275, in connect
+    return self._connection_cls(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\base.py", line 149, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\base.py", line 3299, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\pool\base.py", line 445, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\pool\base.py", line 1324, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\pool\base.py", line 714, in checkout
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 166, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    dbapi_connection = rec.get_connection()
+                       ^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\pool\base.py", line 877, in get_connection
+    self.__connect()
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\pool\base.py", line 916, in __connect
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 166, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\pool\base.py", line 912, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\create.py", line 645, in connect
+    return dialect.connect(*cargs_tup, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\default.py", line 869, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 967, in connect
+    return await_(
+           ^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\concurrency.py", line 167, in await_
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\concurrency.py", line 205, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\connectors\asyncio.py", line 378, in create
+    cls._handle_exception_no_connection(dbapi, error)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 841, in _handle_exception_no_connection
+    super()._handle_exception_no_connection(dbapi, error)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\connectors\asyncio.py", line 409, in _handle_exception_no_connection
+    raise error.with_traceback(exc_info[2])
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\connectors\asyncio.py", line 376, in create
+    connection = await connection_awaitable
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connection.py", line 2498, in connect
+    return await connect_utils._connect(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connect_utils.py", line 1307, in _connect
+    raise last_error or exceptions.TargetServerAttributeNotMatched(
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connect_utils.py", line 1278, in _connect
+    conn = await _connect_addr(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connect_utils.py", line 1088, in _connect_addr
+    return await __connect_addr(params, False, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connect_utils.py", line 1162, in __connect_addr
+    tr, pr = await connector
+             ^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connect_utils.py", line 1012, in _create_ssl_connection
+    new_tr = await loop.start_tls(
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\yadne\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1314, in start_tls
+    await waiter
+  File "C:\Users\yadne\AppData\Local\Programs\Python\Python312\Lib\asyncio\proactor_events.py", line 286, in _loop_reading
+    length = fut.result()
+             ^^^^^^^^^^^^
+  File "C:\Users\yadne\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 803, in _poll
+    value = callback(transferred, key, ov)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\yadne\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 462, in finish_socket_func
+    return ov.getresult()
+           ^^^^^^^^^^^^^^
+ConnectionAbortedError: [WinError 1236] The network connection was aborted by the local system
+INFO:     127.0.0.1:50235 - "WebSocket /ws/session/show-1793370417537-j3ntlt" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:60642 - "WebSocket /ws/session/show-1793370501381-miv9l6" [accepted]
+INFO:     connection open
+session-end file_unfiled_slots failed
+Traceback (most recent call last):
+  File "C:\development\Joker\env\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\development\Joker\env\Lib\site-packages\httpx\_transports\default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\httpcore\_async\connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "C:\development\Joker\env\Lib\site-packages\httpcore\_async\connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\httpcore\_async\connection.py", line 103, in handle_async_request
+    return await self._connection.handle_async_request(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\httpcore\_async\http11.py", line 136, in handle_async_request
+    raise exc
+  File "C:\development\Joker\env\Lib\site-packages\httpcore\_async\http11.py", line 106, in handle_async_request
+    ) = await self._receive_response_headers(**kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\httpcore\_async\http11.py", line 177, in _receive_response_headers
+    event = await self._receive_event(timeout=timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\httpcore\_async\http11.py", line 217, in _receive_event
+    data = await self._network_stream.read(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\httpcore\_backends\anyio.py", line 32, in read
+    with map_exceptions(exc_map):
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\yadne\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\development\Joker\env\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ReadTimeout
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\development\Joker\joker\realtime.py", line 222, in _flush_unfiled_slots
+    await orchestrator.file_unfiled_slots(state=state, session=db_session)
+  File "C:\development\Joker\joker\orchestrator.py", line 627, in file_unfiled_slots
+    await file_told_slot(state=state, slot_idx=slot_idx, session=session)
+  File "C:\development\Joker\joker\orchestrator.py", line 610, in file_told_slot
+    return await _classify_and_upsert_slot(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\joker\orchestrator.py", line 564, in _classify_and_upsert_slot
+    upsert_result = await box_client.upsert_joke(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\shared\box_client.py", line 85, in upsert_joke
+    response = await client.put(
+               ^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\httpx\_client.py", line 1896, in put
+    return await self.request(
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\httpx\_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\httpx\_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\httpx\_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\httpx\_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\httpx\_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\httpx\_transports\default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\yadne\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\development\Joker\env\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ReadTimeout
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\Users\yadne\AppData\Local\Programs\Python\Python312\Lib\asyncio\proactor_events.py", line 286, in _loop_reading
+    length = fut.result()
+             ^^^^^^^^^^^^
+  File "C:\Users\yadne\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 803, in _poll
+    value = callback(transferred, key, ov)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\yadne\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 462, in finish_socket_func
+    return ov.getresult()
+           ^^^^^^^^^^^^^^
+ConnectionAbortedError: [WinError 1236] The network connection was aborted by the local system
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 581, in _prepare_and_execute
+    prepared_stmt, attributes = await adapt_connection._prepare(
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 801, in _prepare
+    prepared_stmt = await self._connection.prepare(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connection.py", line 661, in prepare
+    return await self._prepare(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connection.py", line 680, in _prepare
+    stmt = await self._get_statement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connection.py", line 524, in _get_statement
+    await self._cleanup_stmts()
+  File "C:\development\Joker\env\Lib\site-packages\asyncpg\connection.py", line 1676, in _cleanup_stmts
+    await self._protocol.close_statement(stmt, protocol.NO_TIMEOUT)
+  File "asyncpg/protocol/protocol.pyx", line 550, in close_statement
+asyncpg.exceptions.ConnectionDoesNotExistError: connection was closed in the middle of operation
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\base.py", line 1958, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\default.py", line 1192, in do_execute
+    cursor.execute(statement, parameters)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 656, in execute
+    await_(self._prepare_and_execute(operation, parameters))
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\concurrency.py", line 167, in await_
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\concurrency.py", line 205, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 618, in _prepare_and_execute
+    self._handle_exception(error)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 568, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 847, in _handle_exception
+    super()._handle_exception(error)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\connectors\asyncio.py", line 412, in _handle_exception
+    self._handle_exception_no_connection(self.dbapi, error)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 840, in _handle_exception_no_connection
+    raise translated_error from error
+sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.Error: connection was closed in the middle of operation
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\development\Joker\env\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 422, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 63, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\fastapi\applications.py", line 1194, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\development\Joker\env\Lib\site-packages\starlette\applications.py", line 96, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\development\Joker\env\Lib\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "C:\development\Joker\env\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\development\Joker\env\Lib\site-packages\fastapi\telemetry\_asgi.py", line 151, in __call__
+    await self.app(scope, receive, send)
+  File "C:\development\Joker\env\Lib\site-packages\starlette\middleware\cors.py", line 91, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "C:\development\Joker\env\Lib\site-packages\starlette\middleware\cors.py", line 149, in simple_response
+    await self.app(scope, receive, send)
+  File "C:\development\Joker\env\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\development\Joker\env\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\development\Joker\env\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\development\Joker\env\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "C:\development\Joker\env\Lib\site-packages\starlette\routing.py", line 683, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\development\Joker\env\Lib\site-packages\fastapi\routing.py", line 2811, in app
+    await route.handle(scope, receive, send)
+  File "C:\development\Joker\env\Lib\site-packages\fastapi\routing.py", line 1839, in handle
+    await self.original_router.handle(scope, receive, send)
+  File "C:\development\Joker\env\Lib\site-packages\fastapi\routing.py", line 2894, in handle
+    await included_router._handle_selected(scope, receive, send)
+  File "C:\development\Joker\env\Lib\site-packages\fastapi\routing.py", line 1865, in _handle_selected
+    await original_route.handle(scope, receive, send)
+  File "C:\development\Joker\env\Lib\site-packages\fastapi\routing.py", line 1328, in handle
+    await effective_context.app(scope, receive, send)
+  File "C:\development\Joker\env\Lib\site-packages\fastapi\routing.py", line 166, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\development\Joker\env\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\development\Joker\env\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\development\Joker\env\Lib\site-packages\fastapi\routing.py", line 152, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\fastapi\routing.py", line 745, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\fastapi\routing.py", line 372, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\box\router.py", line 315, in get_box
+    await session.execute(
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 651, in execute
+    result = await greenlet_spawn(
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\concurrency.py", line 212, in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 2473, in execute
+    return self._execute_internal(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\session.py", line 2363, in _execute_internal
+    compile_state_cls.orm_execute_statement(
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\orm\context.py", line 320, in orm_execute_statement
+    result = conn.execute(
+             ^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\base.py", line 1463, in execute
+    return meth(
+           ^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\sql\elements.py", line 533, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\base.py", line 1683, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\base.py", line 1837, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\base.py", line 1977, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\base.py", line 2347, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\base.py", line 1958, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\engine\default.py", line 1192, in do_execute
+    cursor.execute(statement, parameters)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 656, in execute
+    await_(self._prepare_and_execute(operation, parameters))
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\concurrency.py", line 167, in await_
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\util\concurrency.py", line 205, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 618, in _prepare_and_execute
+    self._handle_exception(error)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 568, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 847, in _handle_exception
+    super()._handle_exception(error)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\connectors\asyncio.py", line 412, in _handle_exception
+    self._handle_exception_no_connection(self.dbapi, error)
+  File "C:\development\Joker\env\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 840, in _handle_exception_no_connection
+    raise translated_error from error
+sqlalchemy.exc.DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) connection was closed in the middle of operation
+[SQL: SELECT jokes.id, jokes.score, jokes.joke_text, jokes.category, jokes.provenance, jokes.set_id 
+FROM jokes 
+WHERE jokes.file_id = $1::VARCHAR]
+[parameters: ('03c7c1f2-a9c4-49e2-be5a-ec8531bcf3fb',)]
+(Background on this error at: https://sqlalche.me/e/21/dbapi)

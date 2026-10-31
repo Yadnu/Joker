@@ -1,0 +1,114 @@
+INFO:     127.0.0.1:54971 - "GET /health HTTP/1.1" 200 OK
+[timing] server_ws_accepted +0ms
+[timing] cold_open_picked +719ms
+[timing] voice_start_returned +5405ms
+[timing] warmup_suggest_start +5453ms
+[timing] first_audio_byte +6594ms bytes=47196
+INFO:     127.0.0.1:63250 - "GET /jokes/top?n=20&min_score=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62713 - "GET /genres/coverage HTTP/1.1" 200 OK
+[ws] browser disconnect code=1005 reason=
+INFO:     127.0.0.1:58292 - "GET /compliance HTTP/1.1" 200 OK
+[timing] suggest_and_set_done +23359ms slots=6
+INFO:     127.0.0.1:49296 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49296 - "GET /jokes/97a98bb2-d0af-4317-a6d7-53c90182de85 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60652 - "GET /jokes/97a98bb2-d0af-4317-a6d7-53c90182de85/trace HTTP/1.1" 200 OK
+[timing] all_slots_generated +46140ms
+[timing] set_instructions_pushed +46140ms
+INFO:     127.0.0.1:63357 - "GET /jokes/7219d071-c360-4e60-9af0-44776fd24037 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60830 - "GET /jokes/7219d071-c360-4e60-9af0-44776fd24037/trace HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60830 - "GET /compliance HTTP/1.1" 200 OK
+[timing] session_end +607140ms
+INFO:     127.0.0.1:60562 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58632 - "GET /health HTTP/1.1" 200 OK
+[timing] server_ws_accepted +0ms
+[timing] cold_open_picked +0ms
+INFO:     127.0.0.1:56654 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56654 - "GET /docs HTTP/1.1" 200 OK
+[timing] voice_start_returned +3172ms
+[timing] warmup_suggest_start +3172ms
+[timing] first_audio_byte +4344ms bytes=21780
+INFO:     127.0.0.1:56654 - "GET /counts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64253 - "GET /jokes/top?n=20&min_score=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61679 - "GET /genres/coverage HTTP/1.1" 200 OK
+[timing] suggest_and_set_done +21406ms slots=5
+INFO:     127.0.0.1:61701 - "GET /box HTTP/1.1" 200 OK
+[timing] all_slots_generated +46469ms
+[timing] set_instructions_pushed +46469ms
+[ws] browser disconnect code=1005 reason=
+INFO:     127.0.0.1:61708 - "PUT /box/upsert HTTP/1.1" 201 Created
+INFO:     127.0.0.1:61713 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61718 - "PUT /box/upsert HTTP/1.1" 201 Created
+INFO:     127.0.0.1:61723 - "GET /jokes/top?n=20&min_score=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61726 - "GET /genres/coverage HTTP/1.1" 200 OK
+[timing] server_ws_accepted +0ms
+[timing] cold_open_picked +0ms
+INFO:     127.0.0.1:61724 - "GET /box HTTP/1.1" 200 OK
+[timing] voice_start_returned +2389ms
+[timing] warmup_suggest_start +2389ms
+[timing] first_audio_byte +3953ms bytes=47196
+INFO:     127.0.0.1:60650 - "GET /jokes/top?n=20&min_score=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53535 - "GET /genres/coverage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53539 - "PUT /box/upsert HTTP/1.1" 201 Created
+[timing] suggest_and_set_done +16983ms slots=5
+INFO:     127.0.0.1:53542 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53548 - "PUT /jokes/dc69b99a-0800-4a6f-8dc1-f74bac1ea34f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53552 - "GET /jokes/top?n=20&min_score=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53557 - "GET /genres/coverage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53554 - "GET /box HTTP/1.1" 200 OK
+[ws] browser disconnect code=1005 reason=
+[timing] all_slots_generated +48093ms
+[timing] set_instructions_pushed +48108ms
+INFO:     127.0.0.1:53564 - "PUT /box/upsert HTTP/1.1" 201 Created
+INFO:     127.0.0.1:62164 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62171 - "PUT /box/upsert HTTP/1.1" 201 Created
+INFO:     127.0.0.1:62177 - "GET /jokes/top?n=20&min_score=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62179 - "GET /genres/coverage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52073 - "GET /compliance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52342 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52342 - "GET /jokes/97a98bb2-d0af-4317-a6d7-53c90182de85 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64144 - "GET /jokes/97a98bb2-d0af-4317-a6d7-53c90182de85/trace HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52063 - "GET /compliance HTTP/1.1" 200 OK
+[timing] session_end +604625ms
+INFO:     127.0.0.1:51810 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59522 - "PUT /box/upsert HTTP/1.1" 201 Created
+INFO:     127.0.0.1:59525 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61898 - "PUT /box/upsert HTTP/1.1" 201 Created
+INFO:     127.0.0.1:61902 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53645 - "PUT /box/upsert HTTP/1.1" 201 Created
+INFO:     127.0.0.1:53647 - "GET /box HTTP/1.1" 200 OK
+[timing] session_end +604250ms
+INFO:     127.0.0.1:53889 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51957 - "PUT /box/upsert HTTP/1.1" 201 Created
+INFO:     127.0.0.1:51959 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63827 - "PUT /box/upsert HTTP/1.1" 201 Created
+INFO:     127.0.0.1:63830 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59213 - "PUT /box/upsert HTTP/1.1" 201 Created
+INFO:     127.0.0.1:61754 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61761 - "PUT /box/upsert HTTP/1.1" 201 Created
+INFO:     127.0.0.1:60649 - "GET /jokes/97a98bb2-d0af-4317-a6d7-53c90182de85 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56905 - "GET /compliance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61333 - "GET /jokes/97a98bb2-d0af-4317-a6d7-53c90182de85/trace HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62560 - "GET /jokes/c6827a93-0aa2-4e7f-ac74-f56fcaea5116 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50924 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61890 - "GET /jokes/c6827a93-0aa2-4e7f-ac74-f56fcaea5116/trace HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54145 - "GET /compliance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61589 - "GET /compliance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63415 - "GET /compliance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63802 - "GET /compliance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57401 - "GET /jokes/c6827a93-0aa2-4e7f-ac74-f56fcaea5116 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49940 - "GET /jokes/c6827a93-0aa2-4e7f-ac74-f56fcaea5116/trace HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52464 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55534 - "GET /jokes/c6827a93-0aa2-4e7f-ac74-f56fcaea5116 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64446 - "GET /compliance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54012 - "GET /jokes/c6827a93-0aa2-4e7f-ac74-f56fcaea5116/trace HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53421 - "GET /box HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55062 - "GET /jokes/57839ddb-c1bd-496d-9c80-caea6d53130a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56943 - "GET /jokes/1e0182b0-c139-48c3-b13e-c2cc889329c9 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62891 - "GET /jokes/57839ddb-c1bd-496d-9c80-caea6d53130a/trace HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52344 - "GET /jokes/1e0182b0-c139-48c3-b13e-c2cc889329c9/trace HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58583 - "GET /compliance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61061 - "GET /compliance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54324 - "GET /compliance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58498 - "GET /jokes/1e0182b0-c139-48c3-b13e-c2cc889329c9 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63306 - "GET /compliance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51981 - "GET /jokes/1e0182b0-c139-48c3-b13e-c2cc889329c9/trace HTTP/1.1" 200 OK
